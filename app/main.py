@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import uuid
 import asyncio
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -89,6 +90,25 @@ app = FastAPI(
     lifespan=lifespan,
     debug=settings.DEBUG,
 )
+
+
+@app.middleware("http")
+async def request_id_and_telemetry_middleware(request: Request, call_next):
+    """
+    Middleware estructurado para observabilidad y trazabilidad (US-24).
+    Asigna un request_id único por petición y mide la latencia de respuesta.
+    """
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    request.state.request_id = request_id
+
+    t_start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Response-Time-MS"] = str(duration_ms)
+    return response
+
 
 # Static and Templates
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

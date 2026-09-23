@@ -1,0 +1,84 @@
+from pathlib import Path
+import pymupdf
+import pytest
+
+from app.domain.models import MetadatoImagen
+from app.services.image_service import (
+    inventory_physical_images,
+    classify_image_semantics,
+    catalog_page_images,
+)
+
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def test_us13_physical_inventory_filters_decorative_and_keeps_relevant():
+    # US-13 Escenario 1: Inventario físico local en Cero-IA (PyMuPDF)
+    pdf_path = FIXTURES_DIR / "mixto_sello_firma.pdf"
+    assert pdf_path.exists()
+    doc = pymupdf.open(str(pdf_path))
+    page = doc[0]
+
+    items = inventory_physical_images(page, min_dim_pt=80.0, min_area_ratio=0.005)
+    # The fixture contains an official seal image and vector signature drawings
+    assert len(items) >= 1
+
+    for img in items:
+        assert img.pagina == 1
+        assert len(img.bbox) == 4
+        # bbox has positive area
+        assert img.bbox[2] > img.bbox[0]
+        assert img.bbox[3] > img.bbox[1]
+        assert img.area_ratio > 0.0
+
+    doc.close()
+
+
+def test_us13_semantic_classification_types():
+    # US-13 Escenario 2: Clasificación semántica selectiva
+    # 1. Firma manuscrita
+    sig_meta = MetadatoImagen(
+        id_imagen="sig_01",
+        pagina=1,
+        tipo_fisico="vector",
+        bbox=[100.0, 500.0, 300.0, 580.0],
+        area_ratio=0.05,
+    )
+    sig_label = classify_image_semantics(sig_meta, page_text="Firma del arrendador y representante legal")
+    assert sig_label == "firma_manuscrita"
+
+    # 2. Sello oficial
+    seal_meta = MetadatoImagen(
+        id_imagen="seal_01",
+        pagina=1,
+        tipo_fisico="raster",
+        bbox=[350.0, 500.0, 480.0, 620.0],
+        area_ratio=0.08,
+    )
+    seal_label = classify_image_semantics(seal_meta, page_text="Notaría Décima del Círculo de Bogotá")
+    assert seal_label == "sello_oficial"
+
+    # 3. Logotipo en cabecera
+    logo_meta = MetadatoImagen(
+        id_imagen="logo_01",
+        pagina=1,
+        tipo_fisico="raster",
+        bbox=[50.0, 30.0, 150.0, 90.0],
+        area_ratio=0.02,
+    )
+    logo_label = classify_image_semantics(logo_meta, page_text="EMPRESA S.A.S.")
+    assert logo_label == "logotipo"
+
+
+def test_us13_catalog_page_images_with_classification():
+    pdf_path = FIXTURES_DIR / "mixto_sello_firma.pdf"
+    doc = pymupdf.open(str(pdf_path))
+    page = doc[0]
+
+    cataloged = catalog_page_images(page, catalogar_imagenes=True)
+    assert len(cataloged) >= 1
+    # Check that at least one item received a semantic classification
+    labels = [img.clasificacion_semantica for img in cataloged]
+    assert any(label in ("firma_manuscrita", "sello_oficial", "logotipo", "diagrama") for label in labels)
+
+    doc.close()

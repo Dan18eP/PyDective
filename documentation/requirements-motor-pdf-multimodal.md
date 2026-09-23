@@ -190,6 +190,15 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-098 | El sistema debe soportar expansión semántica mediante diccionario de sinónimos canónicos para parámetros clave comunes. | Búsquedas como `total` recuperan automáticamente `importe`, `saldo`, `valor total` y `grand total`. |
 | RF-099 | El sistema debe tipificar y normalizar valores extraídos de monedas, fechas y números de identificación con soporte de formatos hispanos e internacionales. | Se genera el sub-objeto `valor_normalizado` con tipos (`currency`, `date`, `tax_id`, `percentage`, `text`) estructurados para integración. |
 
+### 4.12 Visor de PDF interactivo, buscador Chrome-like y visual grounding
+
+| ID | Requisito | Criterio verificable |
+|---|---|---|
+| RF-100 | El sistema debe ofrecer un visor interactivo de PDF integrado en la vista de resultados (`resultados.html`) en un layout Split-View responsivo. | La interfaz renderiza las páginas reales del PDF en el panel izquierdo permitiendo zoom y cambio de página. |
+| RF-101 | El sistema debe implementar un buscador de texto exacto en el visor emulando la experiencia de Chrome PDF (`Ctrl+F`). | Entrada de búsqueda con contador dinámico ($N$ de $M$), botones anterior/siguiente, atajos de teclado (`Enter`, `Shift+Enter`), resaltado de todas las ocurrencias en amarillo y la activa en naranja con auto-scroll. |
+| RF-102 | El sistema debe implementar visual grounding bidireccional mediante recuadros delimitadores (*bounding box overlays*) animados para citas de chat y evidencias de hallazgos. | Al pulsar una cita o hallazgo, el visor salta a la página y resalta con exactitud matemática el elemento (texto, sello, firma, código de barras o logo). |
+| RF-103 | El sistema debe exponer un endpoint seguro de entrega del archivo PDF binario (`GET /documentos/{pdf_hash}/raw`). | Entrega el flujo binario con cabecera `Content-Type: application/pdf` para su consumo por el visor. |
+
 ---
 
 ## 5. Requisitos no funcionales
@@ -239,6 +248,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RNF-033 | Las versiones de dependencias deben fijarse. | `requirements.txt` contiene restricciones/versiones acordadas. |
 | RNF-034 | Los cambios de arquitectura relevantes deben documentarse mediante ADR. | ADRs versionados en repositorio. |
 | RNF-035 | El sistema debe contar con pruebas unitarias e integración para los caminos críticos. | Suite cubre caché, clasificación, retry y resultados parciales. |
+| RNF-050 | Ausencia total de datos mock o simulados en los flujos de extracción y visualización. | Toda la información, coordenadas bboxes, citas y respuestas provienen del binario del PDF analizado de punta a punta. |
 
 ### 5.5 Observabilidad
 
@@ -296,6 +306,8 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | ADR-001 | Define arquitectura híbrida, caché y failover |
 | ADR-002 | Define preprocesamiento determinista (Otsu, Deskew), catálogo de imágenes, chat documental y streaming SSE |
 | ADR-003 | Define extracción semántica clave-valor, ventanas de contexto (KWIC) y normalización de entidades |
+| ADR-004 | Define optimización empírica, indexación asociativa L1 y benchmark de calibración |
+| ADR-005 | Define visor de PDF interactivo, buscador Chrome-like, grounding visual bidireccional y cero mocks |
 | Especificación arquitectónica general | Define módulos, flujos y contratos |
 | Estrategia de pruebas | Debe mapear cada caso crítico a RF/RNF/RV |
 | Historias de usuario | Deben referenciar requisitos aplicables |

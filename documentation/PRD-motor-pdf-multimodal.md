@@ -149,6 +149,13 @@ Pymes y equipos administrativos que trabajan con facturas, soportes contables, c
 - Extracción de texto limpio y detección de coincidencias nativas.
 - Análisis multimodal selectivo (Gemini Flash con semáforo global) solo para páginas `needs_ai`.
 - **Módulo Pydective Chat:** Interfaz conversacional conectada a L1/L2 para interrogar al PDF con citas obligatorias de página.
+- **Visor de PDF interactivo con buscador de texto exacto estilo Chrome (`Ctrl+F`):**
+  - Renderizado de alta fidelidad del PDF en la interfaz mediante PDF.js.
+  - Buscador de texto exacto con contador dinámico ($N$ de $M$), botones anterior/siguiente y atajos de teclado (`Enter`, `Shift+Enter`).
+  - Resaltado global de todas las ocurrencias en amarillo y la activa en naranja con desplazamiento suave (*auto-scroll*).
+- **Visual Grounding bidireccional 100% confiable:**
+  - Al pulsar una cita de chat o hallazgo, el visor salta a la página y resalta el recuadro delimitador (*bounding box*) exacto de la evidencia (texto, sello, firma, código de barras, logo).
+- **Cero datos mock:** Todas las coordenadas, extracciones y respuestas se calculan directamente del binario del PDF analizado de punta a punta.
 - Soporte para resultados parciales aislados por página.
 - Modo degradado tolerante a fallos de Redis (memoria local automática).
 - Soporte de streaming de progreso por Server-Sent Events (SSE).
@@ -181,21 +188,18 @@ Debe incluir:
 
 Soporta progreso visual en tiempo real vía SSE (o feedback de carga accesible `aria-live="polite"`), mostrando qué páginas se han completado y qué fase se está ejecutando (Clasificación local, Deskew/Otsu, Inferencia visual).
 
-### Pantalla de resultados y Panel de Detective
+### Pantalla de resultados y Panel de Detective (Layout Split-View)
 
-Debe mostrar:
+Debe mostrar un espacio de trabajo forense interactivo de dos columnas:
 
-- **Cabecera de Trazabilidad:** Hash SHA-256 no sensible, parámetros buscados y badges de rendimiento (páginas locales, IA, tiempo total, hit de caché).
-- **Catálogo Global de Elementos Visuales:** Resumen de imágenes, sellos y firmas detectados a lo largo del PDF con acceso directo a sus páginas.
-- **Lista Ordenada de Páginas:**
-  - Número de página y badge de procedencia (`local`, `ia`, `cache_l1`, `empty`, `advertencia`).
-  - Texto limpio extraído.
-  - Parámetros encontrados resaltados.
-  - **Tarjetas de imágenes detectadas:** Tipo de imagen (sello, firma, logo), descripción contextual y ubicación.
-- **Panel Pydective Chat (Conversar con el Documento):**
-  - Entrada de texto para formular preguntas abiertas sobre el documento.
-  - Historial de conversación con respuestas fundamentadas que citan explícitamente `[Página X]`.
-  - Enlaces directos a las páginas citadas para verificación inmediata.
+1. **Panel Izquierdo — Visor de PDF Integrado:**
+   - Visualización interactiva de las páginas del PDF.
+   - Barra de herramientas con selector de páginas, botones de zoom y ajuste de ancho.
+   - Barra de búsqueda flotante tipo Chrome con navegación anterior/siguiente y contador `$N$ de $M$`.
+   - Capa de resaltado que proyecta los recuadros delimitadores (*Bounding Boxes*) de coincidencias y evidencias.
+2. **Panel Derecho — Detective Chat y Hallazgos:**
+   - **Hero Superior — Pydective Chat:** Asistente conversacional multi-turno con citas verificables `[Página X]`. Al hacer clic en cualquier cita, el visor izquierdo salta y resalta el elemento exacto.
+   - **Inferior — Hallazgos Enriquecidos:** Tabla con parámetros extraídos, valores normalizados, scores de confianza y chips de evidencia que sincronizan el visor con un solo clic.
 
 ### Resultados parciales
 

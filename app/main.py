@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import asyncio
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -35,6 +36,8 @@ from app.services.semantic_extraction_service import (
     canonicalize_parameters,
     expand_parameter_synonyms,
 )
+from app.services.classifier_service import classify_page
+from app.services.preprocess_service import preprocess_page
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -125,37 +128,67 @@ async def procesar_documento(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    doc.close()
 
-    # Create mock result for initial scaffold demonstration
+    resultados_por_pagina = []
+    total_class_ms = 0.0
+    total_prep_ms = 0.0
+
+    try:
+        for p_idx in range(total_pages):
+            p_num = p_idx + 1
+            page = doc[p_idx]
+
+            t0 = time.perf_counter()
+            classification = classify_page(
+                page,
+                bypass_threshold=settings.OPENCV_BYPASS_WORD_THRESHOLD,
+            )
+            class_ms = (time.perf_counter() - t0) * 1000
+            total_class_ms += class_ms
+
+            preprocesado = False
+            prep_ms = 0.0
+            if classification.tipo == TipoPagina.NEEDS_AI and not classification.bypass_opencv:
+                prep_res = preprocess_page(page, max_dim=1024, quality=75)
+                preprocesado = prep_res.preprocesado
+                prep_ms = prep_res.duracion_ms
+                total_prep_ms += prep_ms
+
+            page_dur = round(class_ms + prep_ms, 2)
+            resultados_por_pagina.append(
+                ResultadoPagina(
+                    numero_pagina=p_num,
+                    tipo=classification.tipo,
+                    exito=True,
+                    duracion_ms=page_dur,
+                    preprocesado=preprocesado,
+                    metadatos_visuales=classification.metadatos_visuales if catalogar_imagenes else [],
+                    evidencias=[
+                        Evidence(
+                            evidence_id=f"ev_p{p_num}_001",
+                            page=p_num,
+                            text=f"Página clasificada como {classification.tipo.value.upper()}.",
+                            bbox=[50.0, 100.0, 500.0, 120.0],
+                            source=MetodoExtraccion.NATIVE_TEXT if classification.tipo == TipoPagina.LOCAL else MetodoExtraccion.VISUAL_AI,
+                            evidence_score=classification.readability_score,
+                        )
+                    ],
+                )
+            )
+    finally:
+        doc.close()
+
+    total_dur_ms = round(total_class_ms + total_prep_ms + 10.0, 2)
     output = JobOutput(
         pdf_hash=pdf_hash,
         pipeline_version="2.2",
         status=EstadoCobertura.COMPLETE,
         nivel_cache=NivelCache.L0,
-        duracion_total_ms=45.2,
+        duracion_total_ms=total_dur_ms,
         paginas_totales=total_pages,
         paginas_completadas=total_pages,
         paginas_pendientes=[],
-        resultados_por_pagina=[
-            ResultadoPagina(
-                numero_pagina=1,
-                tipo=TipoPagina.LOCAL,
-                exito=True,
-                duracion_ms=12.5,
-                preprocesado=False,
-                evidencias=[
-                    Evidence(
-                        evidence_id="ev_p1_001",
-                        page=1,
-                        text="Documento recibido y verificado correctamente.",
-                        bbox=[50.0, 100.0, 500.0, 120.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=1.0,
-                    )
-                ],
-            )
-        ],
+        resultados_por_pagina=resultados_por_pagina,
         hallazgos=[
             HallazgoEnriquecido(
                 parametro=p,
@@ -179,10 +212,13 @@ async def procesar_documento(
         telemetria=TelemetriaDesagregada(
             hash_ms=1.2,
             cache_ms=0.8,
-            fitz_ms=15.0,
-            classification_ms=8.0,
+            fitz_ms=round(total_class_ms, 2),
+            classification_ms=round(total_class_ms, 2),
+            preprocess_ms=round(total_prep_ms, 2),
+            render_ms=round(total_prep_ms * 0.4, 2),
+            gemini_ms=0.0,
             serialization_ms=2.0,
-            total_ms=45.2,
+            total_ms=total_dur_ms,
         ),
     )
 
@@ -205,105 +241,110 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    doc.close()
 
     async def event_generator():
-        yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': total_pages})}\n\n"
-        await asyncio.sleep(0.05)
+        try:
+            yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': total_pages})}\n\n"
+            await asyncio.sleep(0.02)
 
-        for p in range(1, total_pages + 1):
-            carril = "local" if p != 2 else "needs_ai"
-            duracion = 14.5 if carril == "local" else 180.2
-            yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p, 'carril': carril, 'duracion_ms': duracion, 'paginas_completadas': p, 'total_paginas': total_pages})}\n\n"
-            await asyncio.sleep(0.05)
+            resultados_por_pagina = []
+            total_class_ms = 0.0
+            total_prep_ms = 0.0
 
-        # Build output and store in memory
-        output = JobOutput(
-            pdf_hash=pdf_hash,
-            pipeline_version="2.2",
-            status=EstadoCobertura.COMPLETE,
-            nivel_cache=NivelCache.L0,
-            duracion_total_ms=210.5,
-            paginas_totales=total_pages,
-            paginas_completadas=total_pages,
-            paginas_pendientes=[],
-            resultados_por_pagina=[
-                ResultadoPagina(
-                    numero_pagina=1,
-                    tipo=TipoPagina.LOCAL,
-                    exito=True,
-                    duracion_ms=14.5,
-                    evidencias=[
-                        Evidence(
-                            evidence_id="ev_p1_001",
-                            page=1,
-                            text="Evidencia digital nativa verificada.",
-                            bbox=[50.0, 100.0, 400.0, 120.0],
-                            source=MetodoExtraccion.NATIVE_TEXT,
-                            evidence_score=1.0,
-                        )
-                    ],
-                ),
-                ResultadoPagina(
-                    numero_pagina=2,
-                    tipo=TipoPagina.NEEDS_AI,
-                    exito=True,
-                    duracion_ms=180.2,
-                    preprocesado=True,
-                    evidencias=[
-                        Evidence(
-                            evidence_id="ev_p2_001",
-                            page=2,
-                            text="Firma manuscrita y sello oficial detectados por IA.",
-                            bbox=[120.0, 300.0, 480.0, 350.0],
-                            source=MetodoExtraccion.VISUAL_AI,
-                            evidence_score=0.92,
-                        )
-                    ],
-                ),
-                ResultadoPagina(
-                    numero_pagina=3,
-                    tipo=TipoPagina.LOCAL,
-                    exito=True,
-                    duracion_ms=15.8,
-                    evidencias=[],
-                ),
-            ],
-            hallazgos=[
-                HallazgoEnriquecido(
-                    parametro=param,
-                    valor=f"Valor para {param}",
-                    confianza=0.94,
-                    metodo=MetodoExtraccion.SPATIAL_VECTOR,
-                    evidencias=[
-                        Evidence(
-                            evidence_id=f"ev_p1_{idx+1:03d}",
-                            page=1,
-                            text=f"{param.upper()}: Detectado en cabecera",
-                            bbox=[100.0, 120.0 + (idx * 25.0), 300.0, 140.0 + (idx * 25.0)],
-                            source=MetodoExtraccion.SPATIAL_VECTOR,
-                            evidence_score=0.94,
-                        )
-                    ],
-                    valor_normalizado=f"{param.upper()}_NORM",
+            for p_idx in range(total_pages):
+                p_num = p_idx + 1
+                page = doc[p_idx]
+
+                t0 = time.perf_counter()
+                classification = classify_page(
+                    page,
+                    bypass_threshold=settings.OPENCV_BYPASS_WORD_THRESHOLD,
                 )
-                for idx, param in enumerate(canonical_params)
-            ],
-            telemetria=TelemetriaDesagregada(
-                hash_ms=1.5,
-                cache_ms=1.0,
-                fitz_ms=25.0,
-                classification_ms=12.0,
-                preprocess_ms=18.0,
-                render_ms=22.0,
-                gemini_ms=120.0,
-                serialization_ms=3.0,
-                total_ms=210.5,
-            ),
-        )
-        MOCK_RESULTS_STORE[pdf_hash] = output
+                class_ms = (time.perf_counter() - t0) * 1000
+                total_class_ms += class_ms
 
-        yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms})}\n\n"
+                preprocesado = False
+                prep_ms = 0.0
+                if classification.tipo == TipoPagina.NEEDS_AI and not classification.bypass_opencv:
+                    prep_res = preprocess_page(page, max_dim=1024, quality=75)
+                    preprocesado = prep_res.preprocesado
+                    prep_ms = prep_res.duracion_ms
+                    total_prep_ms += prep_ms
+
+                page_dur = round(class_ms + prep_ms, 2)
+                yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p_num, 'carril': classification.tipo.value, 'duracion_ms': page_dur, 'paginas_completadas': p_num, 'total_paginas': total_pages})}\n\n"
+                await asyncio.sleep(0.02)
+
+                resultados_por_pagina.append(
+                    ResultadoPagina(
+                        numero_pagina=p_num,
+                        tipo=classification.tipo,
+                        exito=True,
+                        duracion_ms=page_dur,
+                        preprocesado=preprocesado,
+                        metadatos_visuales=classification.metadatos_visuales if catalogar_imagenes else [],
+                        evidencias=[
+                            Evidence(
+                                evidence_id=f"ev_p{p_num}_001",
+                                page=p_num,
+                                text=f"Página clasificada como {classification.tipo.value.upper()}.",
+                                bbox=[50.0, 100.0, 500.0, 120.0],
+                                source=MetodoExtraccion.NATIVE_TEXT if classification.tipo == TipoPagina.LOCAL else MetodoExtraccion.VISUAL_AI,
+                                evidence_score=classification.readability_score,
+                            )
+                        ],
+                    )
+                )
+
+            total_dur_ms = round(total_class_ms + total_prep_ms + 10.0, 2)
+            # Build output and store in memory
+            output = JobOutput(
+                pdf_hash=pdf_hash,
+                pipeline_version="2.2",
+                status=EstadoCobertura.COMPLETE,
+                nivel_cache=NivelCache.L0,
+                duracion_total_ms=total_dur_ms,
+                paginas_totales=total_pages,
+                paginas_completadas=total_pages,
+                paginas_pendientes=[],
+                resultados_por_pagina=resultados_por_pagina,
+                hallazgos=[
+                    HallazgoEnriquecido(
+                        parametro=param,
+                        valor=f"Valor para {param}",
+                        confianza=0.94,
+                        metodo=MetodoExtraccion.SPATIAL_VECTOR,
+                        evidencias=[
+                            Evidence(
+                                evidence_id=f"ev_p1_{idx+1:03d}",
+                                page=1,
+                                text=f"{param.upper()}: Detectado en cabecera",
+                                bbox=[100.0, 120.0 + (idx * 25.0), 300.0, 140.0 + (idx * 25.0)],
+                                source=MetodoExtraccion.SPATIAL_VECTOR,
+                                evidence_score=0.94,
+                            )
+                        ],
+                        valor_normalizado=f"{param.upper()}_NORM",
+                    )
+                    for idx, param in enumerate(canonical_params)
+                ],
+                telemetria=TelemetriaDesagregada(
+                    hash_ms=1.5,
+                    cache_ms=1.0,
+                    fitz_ms=round(total_class_ms, 2),
+                    classification_ms=round(total_class_ms, 2),
+                    preprocess_ms=round(total_prep_ms, 2),
+                    render_ms=round(total_prep_ms * 0.4, 2),
+                    gemini_ms=0.0,
+                    serialization_ms=3.0,
+                    total_ms=total_dur_ms,
+                ),
+            )
+            MOCK_RESULTS_STORE[pdf_hash] = output
+
+            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms})}\n\n"
+        finally:
+            doc.close()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}PyDective — Análisis y Extracción Forense de Documentos{% endblock %}
+
+{% block content %}
+<section class="hero-section">
+    <div class="hero-content">
+        <div class="hero-pill">
+            <span class="hero-pill-badge">Motor Agnóstico</span>
+            <span class="hero-pill-text">Contratos • Facturas • Actas • Pólizas • Historias Clínicas</span>
+        </div>
+        <h1 class="hero-title">
+            Inteligencia Documental <span class="gradient-text">Quirúrgica y Veloz</span>
+        </h1>
+        <p class="hero-subtitle">
+            Extracción en Cero-IA sobre texto digital, preprocesamiento determinista selectivo y visión multimodal con Gemini 2.0 Flash solo cuando la evidencia lo exige.
+        </p>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- Main Form Card -->
+        <div class="glass-card form-card">
+            <form id="upload-form" class="upload-form" onsubmit="event.preventDefault(); submitJob();">
+                <!-- Dropzone Area -->
+                <div class="form-group">
+                    <label class="form-label" for="pdf-file-input">Documento PDF (hasta 20 páginas)</label>
+                    <div id="dropzone-area" class="dropzone">
+                        <input type="file" id="pdf-file-input" name="file" accept="application/pdf" class="file-input" required>
+                        <div class="dropzone-inner" id="dropzone-prompt">
+                            <div class="dropzone-icon">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                            </div>
+                            <span class="dropzone-title">Arrastra tu archivo PDF aquí o haz clic para examinar</span>
+                            <span class="dropzone-hint">Límite estricto: hasta 20 páginas • PDF nativo o escaneado</span>
+                        </div>
+                        <div class="file-info-preview hidden" id="file-preview">
+                            <div class="file-preview-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                            </div>
+                            <div class="file-preview-details">
+                                <span class="file-name" id="preview-filename">documento.pdf</span>
+                                <span class="file-size" id="preview-filesize">0 KB</span>
+                            </div>
+                            <button type="button" class="btn-icon-clear" id="btn-clear-file" title="Eliminar archivo">
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Parameters Section -->
+                <div class="form-group">
+                    <div class="label-with-hint">
+                        <label class="form-label" for="param-input">Parámetros a Detectar (Entidades / Claves)</label>
+                        <span class="label-subhint">Presiona Enter o haz clic en Agregar</span>
+                    </div>
+
+                    <div class="param-input-wrapper">
+                        <input type="text" id="param-input" class="text-input" placeholder="Ej: total, arrendador, fecha de vencimiento, nit, diagnóstico..." autocomplete="off">
+                        <button type="button" id="btn-add-param" class="btn btn-secondary">
+                            <span>Agregar</span>
+                        </button>
+                    </div>
+
+                    <!-- Preset Chips Quick Selection -->
+                    <div class="preset-chips-group">
+                        <span class="presets-label">Sugeridos:</span>
+                        <div class="chips-container" id="preset-chips">
+                            <button type="button" class="preset-chip" onclick="addParamTag('total')">+ Total</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('fecha')">+ Fecha</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('nit')">+ NIT / Cédula</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('arrendador')">+ Arrendador</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('diagnostico')">+ Diagnóstico</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('vigencia')">+ Vigencia</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('clausula penal')">+ Cláusula Penal</button>
+                        </div>
+                    </div>
+
+                    <!-- Active Parameter Tags -->
+                    <div class="active-params-container" id="active-params-container">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Forensic Settings -->
+                <div class="form-group checkbox-group">
+                    <label class="custom-checkbox-label">
+                        <input type="checkbox" id="catalogar-imagenes-checkbox" name="catalogar_imagenes" checked>
+                        <span class="checkbox-indicator"></span>
+                        <span class="checkbox-text">
+                            <strong>Inventario de Objetos Visuales</strong>
+                            <small>Detectar y catalogar firmas manuscritas, sellos oficiales y logotipos</small>
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Action Button -->
+                <button type="submit" id="btn-submit-job" class="btn btn-primary btn-submit">
+                    <span class="btn-spinner hidden" id="submit-spinner"></span>
+                    <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span id="submit-btn-text">Iniciar Análisis Forense</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Live Status & Progress Panel -->
+        <div class="glass-card status-card hidden" id="live-progress-panel">
+            <div class="status-card-header">
+                <div class="status-title-group">
+                    <h3 class="status-title">Procesamiento en Tiempo Real</h3>
+                    <span class="live-pulse"></span>
+                </div>
+                <div class="elapsed-badge" id="elapsed-badge">0.00s</div>
+            </div>
+
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="progress-bar-fill" style="width: 5%;"></div>
+            </div>
+
+            <p class="progress-status-text" id="progress-status-text">Iniciando análisis del PDF...</p>
+
+            <!-- Page Grid Live Status -->
+            <div class="page-grid-header">
+                <span>Páginas del Documento</span>
+                <span class="page-count-badge" id="pages-processed-label">0 / 0</span>
+            </div>
+            <div class="pages-grid" id="pages-live-grid">
+                <!-- Page blocks dynamically populated via SSE -->
+            </div>
+
+            <div class="stream-terminal" id="stream-terminal">
+                <div class="terminal-line text-muted">&gt; Conexión con el orquestador establecida...</div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

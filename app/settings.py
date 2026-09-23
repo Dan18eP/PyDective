@@ -1,0 +1,59 @@
+from typing import List
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    # Environment
+    ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+    DEBUG: bool = True
+
+    # Server
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+
+    # Model & AI
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_API_KEYS: str = Field(
+        default="",
+        description="Comma-separated list of Google Gemini API keys"
+    )
+
+    # Concurrency
+    MAX_CONCURRENT_PAGES_PER_PROJECT: int = 5
+    MAX_WORKERS_PER_JOB: int = 4
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 0.5
+
+    # In-memory Cache Fallback Limits
+    MAX_CACHE_DOCUMENTS: int = 100
+    MAX_CACHE_DOCUMENT_BYTES: int = 5 * 1024 * 1024  # 5 MB
+    MAX_TOTAL_CACHE_BYTES: int = 256 * 1024 * 1024  # 256 MB
+
+    # Engine Limits & Thresholds
+    MAX_PAGES_PER_DOCUMENT: int = 20
+    GLOBAL_DEADLINE_SECONDS: float = 25.0
+    OPENCV_BYPASS_WORD_THRESHOLD: int = 80
+    CATALOGAR_IMAGENES_DEFAULT: bool = True
+
+    # L2 Cache
+    L2_CACHE_MIN_TOKENS: int = 32768
+    L2_CACHE_TTL_MINUTES: int = 5
+
+    @property
+    def api_keys_list(self) -> List[str]:
+        if not self.GEMINI_API_KEYS:
+            return []
+        return [k.strip() for k in self.GEMINI_API_KEYS.split(",") if k.strip()]
+
+
+settings = Settings()

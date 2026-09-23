@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Resultados Forenses — PyDective ({{ resultado.pdf_hash[:8] }}){% endblock %}
+
+{% block content %}
+<section class="results-section">
+    <!-- Header Card -->
+    <div class="glass-card results-header-card">
+        <div class="results-header-left">
+            <a href="/" class="btn-back">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+                <span>Nuevo Análisis</span>
+            </a>
+            <div class="doc-title-group">
+                <h1 class="results-title">Dictamen Documental</h1>
+                <div class="hash-tag">
+                    <span class="hash-label">SHA-256:</span>
+                    <code class="hash-code" id="doc-pdf-hash">{{ resultado.pdf_hash }}</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="results-header-badges">
+            <div class="metric-pill">
+                <span class="metric-label">Caché</span>
+                <span class="metric-value badge-cache-{{ resultado.nivel_cache.value.lower() }}">{{ resultado.nivel_cache.value }}</span>
+            </div>
+            <div class="metric-pill">
+                <span class="metric-label">Tiempo Total</span>
+                <span class="metric-value highlight-cyan">{{ resultado.duracion_total_ms | round(1) }} ms</span>
+            </div>
+            <div class="metric-pill">
+                <span class="metric-label">Páginas</span>
+                <span class="metric-value">{{ resultado.paginas_completadas }} / {{ resultado.paginas_totales }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="results-grid">
+        <!-- Left Column: Findings & Pages -->
+        <div class="results-main-col">
+            <!-- Findings Section -->
+            <div class="glass-card findings-card">
+                <div class="section-card-header">
+                    <div class="title-with-badge">
+                        <h2 class="section-title">Hallazgos Enriquecidos</h2>
+                        <span class="badge-count">{{ resultado.hallazgos | length }}</span>
+                    </div>
+                </div>
+
+                {% if resultado.hallazgos %}
+                <div class="findings-table-wrapper">
+                    <table class="findings-table">
+                        <thead>
+                            <tr>
+                                <th>Parámetro</th>
+                                <th>Valor Extraído</th>
+                                <th>Normalizado</th>
+                                <th>Método</th>
+                                <th>Score</th>
+                                <th>Evidencias</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in resultado.hallazgos %}
+                            <tr class="finding-row">
+                                <td class="param-cell">
+                                    <span class="param-badge">{{ h.parametro }}</span>
+                                </td>
+                                <td class="value-cell">
+                                    <strong>{{ h.valor }}</strong>
+                                </td>
+                                <td class="norm-cell">
+                                    {% if h.valor_normalizado %}
+                                        <code class="norm-code">{{ h.valor_normalizado }}</code>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="method-badge method-{{ h.metodo.value }}">
+                                        {{ h.metodo.value }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="score-container" title="Evidence Score: {{ (h.confianza * 100) | round(1) }}%">
+                                        <div class="score-bar">
+                                            <div class="score-fill" style="width: {{ (h.confianza * 100) | round(0) }}%;"></div>
+                                        </div>
+                                        <span class="score-text">{{ (h.confianza * 100) | round(0) }}%</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="citations-list">
+                                        {% for ev in h.evidencias %}
+                                        <span class="citation-pill" title="Evidencia {{ ev.evidence_id }} en bbox {{ ev.bbox }}">
+                                            Pág {{ ev.page }}
+                                        </span>
+                                        {% endfor %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <p>No se encontraron coincidencias para los parámetros ingresados en este documento.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Pages Breakdown Section -->
+            <div class="glass-card pages-breakdown-card">
+                <div class="section-card-header">
+                    <h2 class="section-title">Desglose por Página</h2>
+                </div>
+
+                <div class="pages-cards-container">
+                    {% for p in resultado.resultados_por_pagina %}
+                    <div class="page-card status-{{ p.tipo.value }}">
+                        <div class="page-card-header">
+                            <span class="page-badge">Página {{ p.numero_pagina }}</span>
+                            <span class="page-type-tag type-{{ p.tipo.value }}">{{ p.tipo.value }}</span>
+                        </div>
+                        <div class="page-card-body">
+                            <div class="page-stat">
+                                <span class="page-stat-label">Duración:</span>
+                                <span class="page-stat-value">{{ p.duracion_ms | round(1) }} ms</span>
+                            </div>
+                            <div class="page-stat">
+                                <span class="page-stat-label">Evidencias:</span>
+                                <span class="page-stat-value">{{ p.evidencias | length }}</span>
+                            </div>
+                            {% if p.metadatos_visuales %}
+                            <div class="page-visuals">
+                                <span class="visuals-label">Visuales:</span>
+                                <div class="visuals-tags">
+                                    {% for img in p.metadatos_visuales %}
+                                    <span class="visual-tag" title="BBox: {{ img.bbox }}">
+                                        {{ img.clasificacion_semantica or 'objeto' }}
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Interactive Pydective Chat -->
+        <div class="results-chat-col">
+            <div class="glass-card chat-card">
+                <div class="chat-header">
+                    <div class="chat-title-group">
+                        <div class="chat-avatar">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="chat-title">Pydective Chat</h3>
+                            <span class="chat-subtitle">Grounding de evidencias sobre L1</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-messages" id="chat-messages-container">
+                    <div class="chat-bubble bubble-assistant">
+                        <p>Hola. He analizado el documento completo. Puedes hacerme preguntas específicas sobre cláusulas, valores, partes o evidencias detectadas.</p>
+                    </div>
+                </div>
+
+                <div class="chat-input-wrapper">
+                    <form id="chat-form" class="chat-form" onsubmit="event.preventDefault(); sendChatMessage();">
+                        <input type="text" id="chat-input-field" class="chat-input" placeholder="Pregunta sobre este documento..." autocomplete="off">
+                        <button type="submit" id="btn-send-chat" class="btn-chat-send" title="Enviar pregunta">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

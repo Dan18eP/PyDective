@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PyDective — Motor Documental Multimodal Ultra-Rápido{% endblock %}</title>
+    <meta name="description" content="PyDective: Extracción documental quirúrgica a velocidad nativa en C con PyMuPDF, visión determinista con OpenCV e IA multimodal selectiva con Gemini 2.0 Flash.">
+    
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="dark-theme">
+    <!-- Background glowing ambient lights -->
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+    <div class="ambient-glow glow-3"></div>
+
+    <header class="navbar">
+        <div class="nav-container">
+            <a href="/" class="brand-logo" id="nav-brand-logo">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <circle cx="11.5" cy="14.5" r="2.5"></circle>
+                        <path d="m13.5 16.5 2 2"></path>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <span class="brand-name">PyDective</span>
+                    <span class="brand-badge">v2.2 Multimodal</span>
+                </div>
+            </a>
+
+            <div class="nav-status-group">
+                <div class="status-pill status-active" id="engine-status-pill">
+                    <span class="status-dot"></span>
+                    <span class="status-label">Motor Activo</span>
+                </div>
+                <div class="status-pill status-secondary" id="model-status-pill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                    <span>Gemini 2.0 Flash</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <div class="footer-container">
+            <div class="footer-col">
+                <span class="footer-title">PyDective Architecture</span>
+                <p class="footer-desc">
+                    Extracción espacial O(N) nativa en C, Deskew selectivo determinista y Grounding de evidencia verificable.
+                </p>
+            </div>
+            <div class="footer-col footer-specs">
+                <div class="spec-item">
+                    <span class="spec-label">Presupuesto L0</span>
+                    <span class="spec-value">&lt; 20 ms</span>
+                </div>
+                <div class="spec-item">
+                    <span class="spec-label">Presupuesto L1</span>
+                    <span class="spec-value">&lt; 50 ms</span>
+                </div>
+                <div class="spec-item">
+                    <span class="spec-label">Digital Nativo</span>
+                    <span class="spec-value">p95 &lt; 200 ms</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

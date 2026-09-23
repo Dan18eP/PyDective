@@ -52,3 +52,8 @@ htmlcov/
 tmp/
 *.tmp
 *.log
+
+# Node & Frontend
+node_modules/
+npm-debug.log*
+

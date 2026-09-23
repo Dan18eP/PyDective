@@ -2,6 +2,12 @@
 
 {% block title %}Resultados Forenses — PyDective ({{ resultado.pdf_hash[:8] }}){% endblock %}
 
+{% block extra_head %}
+<!-- PDF.js library for high-fidelity client-side rendering -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="stylesheet" href="/static/css/pdf_viewer.css">
+{% endblock %}
+
 {% block content %}
 <section class="results-section">
     <!-- Header Card -->
@@ -39,173 +45,271 @@
         </div>
     </div>
 
-    <!-- PRIMARY CHAT COMPONENT (HERO PRINCIPAL) -->
-    <div class="glass-card chat-card chat-hero-card">
-        <div class="chat-header">
-            <div class="chat-title-group">
-                <div class="chat-avatar">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                    </svg>
+    <!-- SPLIT-VIEW: VISOR PDF REAL (IZQUIERDA) + INTELIGENCIA DOCUMENTAL (DERECHA) -->
+    <div class="pydective-split-layout">
+        
+        <!-- COLUMNA IZQUIERDA: VISOR DE PDF NATIVO INTERACTIVO (RF-100, RF-101, RF-102) -->
+        <div class="pdf-viewer-pane" id="pdf-viewer-pane">
+            <!-- Barra Superior de Herramientas del Visor -->
+            <div class="pdf-viewer-toolbar">
+                <div class="pdf-toolbar-group">
+                    <button type="button" class="pdf-toolbar-btn" id="pdf-btn-prev" title="Página anterior">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                    <span class="pdf-page-indicator">
+                        Pág <strong id="pdf-page-current">1</strong> / <span id="pdf-page-total">{{ resultado.paginas_totales }}</span>
+                    </span>
+                    <button type="button" class="pdf-toolbar-btn" id="pdf-btn-next" title="Página siguiente">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
                 </div>
-                <div>
-                    <h2 class="chat-title">Pydective Chat</h2>
-                    <span class="chat-subtitle">Asistente forense conversacional con grounding en evidencias de L1</span>
+
+                <div class="pdf-toolbar-group">
+                    <button type="button" class="pdf-toolbar-btn" id="pdf-btn-zoom-out" title="Reducir zoom">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                    </button>
+                    <span class="pdf-zoom-label" id="pdf-zoom-level">125%</span>
+                    <button type="button" class="pdf-toolbar-btn" id="pdf-btn-zoom-in" title="Aumentar zoom">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                    </button>
+                    <button type="button" class="pdf-toolbar-btn" id="pdf-btn-fit-width" title="Ajustar al ancho">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                        <span>Ajustar</span>
+                    </button>
                 </div>
-            </div>
 
-            <!-- Sugerencias Rápidas de Preguntas -->
-            <div class="chat-suggestions">
-                <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Tiene un código de barras o código QR?')">
-                    + ¿Tiene código de barras o QR?
-                </button>
-                <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Cuáles son las partes y representantes identificados?')">
-                    + ¿Partes y representantes?
-                </button>
-                <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Cuál es el valor total y los montos registrados?')">
-                    + ¿Valor total y montos?
-                </button>
-                <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Hay sellos notariales o firmas autógrafas?')">
-                    + ¿Sellos o firmas?
-                </button>
-            </div>
-        </div>
-
-        <div class="chat-messages" id="chat-messages-container">
-            <div class="chat-bubble bubble-assistant">
-                <p>Hola. He analizado el documento completo de {{ resultado.paginas_totales }} páginas. Puedes preguntarme en lenguaje natural sobre cualquier dato, monto, cláusula o elemento visual (códigos de barras, sellos, firmas, etc.).</p>
-            </div>
-        </div>
-
-        <div class="chat-input-wrapper">
-            <form id="chat-form" class="chat-form" onsubmit="event.preventDefault(); sendChatMessage();">
-                <input type="text" id="chat-input-field" class="chat-input" placeholder="Haz una pregunta sobre el documento (ej: ¿Tiene un código de barras? o ¿Cuál es el total?)..." autocomplete="off">
-                <button type="submit" id="btn-send-chat" class="btn-chat-send" title="Enviar pregunta">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                    <span>Preguntar</span>
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <!-- SECCIÓN INFERIOR: HALLAZGOS EXTRAÍDOS Y DESGLOSE -->
-    <div class="results-details-wrapper">
-        <!-- Findings Section -->
-        <div class="glass-card findings-card">
-            <div class="section-card-header">
-                <div class="title-with-badge">
-                    <h2 class="section-title">Hallazgos Enriquecidos</h2>
-                    <span class="badge-count">{{ resultado.hallazgos | length }}</span>
+                <div class="pdf-toolbar-group">
+                    <button type="button" class="pdf-toolbar-btn" onclick="document.getElementById('pdf-finder-toolbar').classList.toggle('hidden'); document.getElementById('pdf-search-input').focus();" title="Buscar en PDF (Ctrl+F)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <span>Buscar (Ctrl+F)</span>
+                    </button>
                 </div>
             </div>
 
-            {% if resultado.hallazgos %}
-            <div class="findings-table-wrapper">
-                <table class="findings-table">
-                    <thead>
-                        <tr>
-                            <th>Parámetro</th>
-                            <th>Valor Extraído</th>
-                            <th>Normalizado</th>
-                            <th>Método</th>
-                            <th>Score</th>
-                            <th>Evidencias</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for h in resultado.hallazgos %}
-                        <tr class="finding-row">
-                            <td class="param-cell">
-                                <span class="param-badge">{{ h.parametro }}</span>
-                            </td>
-                            <td class="value-cell">
-                                <strong>{{ h.valor }}</strong>
-                            </td>
-                            <td class="norm-cell">
-                                {% if h.valor_normalizado %}
-                                    <code class="norm-code">{{ h.valor_normalizado }}</code>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <span class="method-badge method-{{ h.metodo.value }}">
-                                    {{ h.metodo.value }}
-                                </span>
-                            </td>
-                            <td>
-                                <div class="score-container" title="Evidence Score: {{ (h.confianza * 100) | round(1) }}%">
-                                    <div class="score-bar">
-                                        <div class="score-fill" style="width: {{ (h.confianza * 100) | round(0) }}%;"></div>
+            <!-- Buscador estilo Chrome Flotante (RF-101) -->
+            <div class="pdf-finder-bar hidden" id="pdf-finder-toolbar">
+                <input type="text" id="pdf-search-input" class="pdf-finder-input" placeholder="Buscar texto en PDF..." autocomplete="off">
+                <span class="pdf-finder-counter" id="pdf-search-counter">0 / 0</span>
+                <button type="button" class="pdf-finder-nav-btn" id="pdf-search-prev" title="Coincidencia anterior (Shift+Enter)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                </button>
+                <button type="button" class="pdf-finder-nav-btn" id="pdf-search-next" title="Coincidencia siguiente (Enter)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+                <button type="button" class="pdf-finder-nav-btn pdf-finder-close" id="pdf-search-close" title="Cerrar buscador (Esc)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+
+            <!-- Contenedor Scrollable de Páginas Renderizadas con Overlays -->
+            <div class="pdf-pages-scroll-container" id="pdf-viewer-pages-container">
+                <div class="pdf-loading-state">
+                    <div class="loading-spinner"></div>
+                    <p>Iniciando visor documental con aceleración por hardware...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- COLUMNA DERECHA: PYDECTIVE CHAT + HALLAZGOS ESTRUCTURADOS -->
+        <div class="pydective-info-pane">
+            
+            <!-- Pydective Chat Interactivo con Grounding -->
+            <div class="glass-card chat-card chat-hero-card" style="height: 480px;">
+                <div class="chat-header">
+                    <div class="chat-title-group">
+                        <div class="chat-avatar">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 class="chat-title">Pydective Chat</h2>
+                            <span class="chat-subtitle">Consulta datos o imágenes y visualiza su fuente exacta en el visor</span>
+                        </div>
+                    </div>
+
+                    <!-- Sugerencias Rápidas de Preguntas -->
+                    <div class="chat-suggestions">
+                        <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Tiene un código de barras o código QR?')">
+                            + ¿Tiene código de barras o QR?
+                        </button>
+                        <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Cuáles son las partes y representantes identificados?')">
+                            + ¿Partes y representantes?
+                        </button>
+                        <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Cuál es el valor total y los montos registrados?')">
+                            + ¿Valor total y montos?
+                        </button>
+                        <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Hay sellos notariales o firmas autógrafas?')">
+                            + ¿Sellos o firmas?
+                        </button>
+                    </div>
+                </div>
+
+                <div class="chat-messages" id="chat-messages-container">
+                    <div class="chat-bubble bubble-assistant">
+                        <p>Hola. He analizado el documento completo de {{ resultado.paginas_totales }} páginas. Pregúntame sobre cualquier parámetro, cláusula o elemento visual (códigos de barras, firmas, sellos). Haz clic en cualquier cita generada para localizarla en el visor de la izquierda.</p>
+                    </div>
+                </div>
+
+                <div class="chat-input-wrapper">
+                    <form id="chat-form" class="chat-form" onsubmit="event.preventDefault(); sendChatMessage();">
+                        <input type="text" id="chat-input-field" class="chat-input" placeholder="Haz una pregunta sobre el PDF..." autocomplete="off">
+                        <button type="submit" id="btn-send-chat" class="btn-chat-send" title="Enviar pregunta">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            <span>Preguntar</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Hallazgos Enriquecidos con Grounding Bidireccional -->
+            <div class="glass-card findings-card">
+                <div class="section-card-header">
+                    <div class="title-with-badge">
+                        <h2 class="section-title">Hallazgos Extraídos</h2>
+                        <span class="badge-count">{{ resultado.hallazgos | length }}</span>
+                    </div>
+                    <span class="text-muted" style="font-size: 0.8rem;">Haz clic en las evidencias para ver en el visor</span>
+                </div>
+
+                {% if resultado.hallazgos %}
+                <div class="findings-table-wrapper">
+                    <table class="findings-table">
+                        <thead>
+                            <tr>
+                                <th>Parámetro</th>
+                                <th>Valor Extraído</th>
+                                <th>Método</th>
+                                <th>Score</th>
+                                <th>Citas en Visor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in resultado.hallazgos %}
+                            <tr class="finding-row finding-row-interactive">
+                                <td class="param-cell">
+                                    <span class="param-badge">{{ h.parametro }}</span>
+                                </td>
+                                <td class="value-cell">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                                        <strong>{{ h.valor }}</strong>
+                                        {% if h.valor and h.valor != 'No encontrado' %}
+                                        <button type="button" class="btn-search-trigger" onclick="window.triggerSearchInPdf('{{ h.valor }}')" title="Buscar coincidencias en el visor">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                            <span>Buscar</span>
+                                        </button>
+                                        {% endif %}
                                     </div>
-                                    <span class="score-text">{{ (h.confianza * 100) | round(0) }}%</span>
-                                </div>
-                            </td>
-                            <td>
-                                <div class="citations-list">
-                                    {% for ev in h.evidencias %}
-                                    <span class="citation-pill" title="Evidencia {{ ev.evidence_id }} en bbox {{ ev.bbox }}">
-                                        Pág {{ ev.page }}
+                                </td>
+                                <td>
+                                    <span class="method-badge method-{{ h.metodo.value }}">
+                                        {{ h.metodo.value }}
                                     </span>
+                                </td>
+                                <td>
+                                    <div class="score-container" title="Score: {{ (h.confianza * 100) | round(1) }}%">
+                                        <div class="score-bar">
+                                            <div class="score-fill" style="width: {{ (h.confianza * 100) | round(0) }}%;"></div>
+                                        </div>
+                                        <span class="score-text">{{ (h.confianza * 100) | round(0) }}%</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="citations-list">
+                                        {% for ev in h.evidencias %}
+                                        <button type="button" class="citation-pill citation-pill-interactive" 
+                                                onclick="window.highlightSourceInPdf({{ ev.page }}, {{ ev.bbox }}, '{{ h.parametro }}')"
+                                                title="Localizar en página {{ ev.page }} (bbox: {{ ev.bbox }})">
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                            <span>Pág {{ ev.page }}</span>
+                                        </button>
+                                        {% else %}
+                                        <span class="text-muted" style="font-size: 0.75rem;">—</span>
+                                        {% endfor %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <p>No se encontraron coincidencias para los parámetros ingresados en este documento.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Desglose por Página con Detección de Imágenes -->
+            <div class="glass-card pages-breakdown-card">
+                <div class="section-card-header">
+                    <h2 class="section-title">Desglose e Inventario Visual</h2>
+                    <span class="text-muted" style="font-size: 0.8rem;">Haz clic en un elemento visual para enfocarlo</span>
+                </div>
+
+                <div class="pages-cards-container">
+                    {% for p in resultado.resultados_por_pagina %}
+                    <div class="page-card status-{{ p.tipo.value }}">
+                        <div class="page-card-header">
+                            <button type="button" class="page-badge" style="background: transparent; border: none; cursor: pointer; color: inherit; padding: 0; font-weight: 600;" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage({{ p.numero_pagina }});">
+                                Página {{ p.numero_pagina }} ↗
+                            </button>
+                            <span class="page-type-tag type-{{ p.tipo.value }}">{{ p.tipo.value }}</span>
+                        </div>
+                        <div class="page-card-body">
+                            <div class="page-stat">
+                                <span class="page-stat-label">Duración:</span>
+                                <span class="page-stat-value">{{ p.duracion_ms | round(1) }} ms</span>
+                            </div>
+                            <div class="page-stat">
+                                <span class="page-stat-label">Evidencias:</span>
+                                <span class="page-stat-value">{{ p.evidencias | length }}</span>
+                            </div>
+                            {% if p.metadatos_visuales %}
+                            <div class="page-visuals">
+                                <span class="visuals-label">Visuales:</span>
+                                <div class="visuals-tags">
+                                    {% for img in p.metadatos_visuales %}
+                                    <button type="button" class="visual-tag visual-tag-interactive" 
+                                            onclick="window.highlightSourceInPdf({{ p.numero_pagina }}, {{ img.bbox }}, '{{ img.clasificacion_semantica or 'objeto' }}')"
+                                            title="Enfocar en visor: {{ img.clasificacion_semantica or 'objeto' }} (Pág {{ p.numero_pagina }})">
+                                        {{ img.clasificacion_semantica or 'objeto' }}
+                                    </button>
                                     {% endfor %}
                                 </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="empty-state">
-                <p>No se encontraron coincidencias para los parámetros ingresados en este documento.</p>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Pages Breakdown Section -->
-        <div class="glass-card pages-breakdown-card">
-            <div class="section-card-header">
-                <h2 class="section-title">Desglose por Página</h2>
-            </div>
-
-            <div class="pages-cards-container">
-                {% for p in resultado.resultados_por_pagina %}
-                <div class="page-card status-{{ p.tipo.value }}">
-                    <div class="page-card-header">
-                        <span class="page-badge">Página {{ p.numero_pagina }}</span>
-                        <span class="page-type-tag type-{{ p.tipo.value }}">{{ p.tipo.value }}</span>
-                    </div>
-                    <div class="page-card-body">
-                        <div class="page-stat">
-                            <span class="page-stat-label">Duración:</span>
-                            <span class="page-stat-value">{{ p.duracion_ms | round(1) }} ms</span>
-                        </div>
-                        <div class="page-stat">
-                            <span class="page-stat-label">Evidencias:</span>
-                            <span class="page-stat-value">{{ p.evidencias | length }}</span>
-                        </div>
-                        {% if p.metadatos_visuales %}
-                        <div class="page-visuals">
-                            <span class="visuals-label">Visuales:</span>
-                            <div class="visuals-tags">
-                                {% for img in p.metadatos_visuales %}
-                                <span class="visual-tag" title="BBox: {{ img.bbox }}">
-                                    {{ img.clasificacion_semantica or 'objeto' }}
-                                </span>
-                                {% endfor %}
                             </div>
+                            {% endif %}
                         </div>
-                        {% endif %}
                     </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
             </div>
+
         </div>
     </div>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pdf_viewer.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const hashEl = document.getElementById("doc-pdf-hash");
+        if (hashEl) {
+            const pdfHash = hashEl.textContent.trim();
+            if (pdfHash) {
+                console.log("[PyDective] Inicializando visor PDF para hash:", pdfHash);
+                window.activePdfViewer = new PydectivePdfViewer({
+                    pdfHash: pdfHash,
+                    containerId: 'pdf-viewer-pages-container'
+                });
+            }
+        }
+    });
+</script>
 {% endblock %}

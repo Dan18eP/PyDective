@@ -8,10 +8,16 @@ from pathlib import Path
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, File, Form, UploadFile, HTTPException, status
+from fastapi import FastAPI, Request, File, Form, UploadFile, HTTPException, status, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from app.services.pdf_viewer_service import (
+    save_uploaded_pdf,
+    get_pdf_bytes_by_hash,
+    search_exact_pdf_occurrences,
+)
 
 from app.settings import settings
 from app.domain.enums import NivelCache, EstadoCobertura, TipoPagina, MetodoExtraccion
@@ -185,6 +191,7 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
             cand_bytes = cand.read_bytes()
             h = hashlib.sha256(cand_bytes).hexdigest()
             if h == pdf_hash:
+                save_uploaded_pdf(pdf_hash, cand_bytes)
                 _, doc, total_pages = validate_and_read_pdf(cand_bytes, filename=cand.name)
                 canonical_params = ["total", "fecha", "nit", "arrendador", "representante legal"]
 
@@ -397,6 +404,7 @@ async def procesar_documento(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    save_uploaded_pdf(pdf_hash, pdf_bytes)
 
     # 3. Consulta temprana de Caché L0 instantánea (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
@@ -599,6 +607,7 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    save_uploaded_pdf(pdf_hash, pdf_bytes)
 
     # 3. Consulta temprana L0 en streaming (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
@@ -837,3 +846,46 @@ async def chat_documental(pdf_hash: str, payload: ChatInput):
         historial=payload.historial,
         fallback_store=MOCK_RESULTS_STORE,
     )
+
+
+@app.get("/documentos/{pdf_hash}/raw")
+async def obtener_pdf_crudo(pdf_hash: str):
+    """
+    Sirve el archivo binario del PDF para renderizado de alta fidelidad en el visor PDF.js (RF-100, RF-103).
+    """
+    pdf_bytes = get_pdf_bytes_by_hash(pdf_hash)
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El archivo PDF con hash '{pdf_hash}' no fue encontrado en el servidor.",
+        )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{pdf_hash}.pdf"',
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+@app.get("/documentos/{pdf_hash}/search")
+async def buscar_coincidencias_exactas_pdf(pdf_hash: str, q: str = ""):
+    """
+    Buscador textual exacto estilo Chrome para el visor de PDF (RF-101).
+    Retorna coordenadas rectangulares PyMuPDF [x0, y0, x1, y1] por página.
+    """
+    if not q.strip():
+        return {
+            "query": "",
+            "total_coincidencias": 0,
+            "coincidencias": [],
+        }
+    res = search_exact_pdf_occurrences(pdf_hash, q)
+    if "error" in res and res.get("total_coincidencias") == 0 and not get_pdf_bytes_by_hash(pdf_hash):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=res["error"],
+        )
+    return res
+

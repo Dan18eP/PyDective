@@ -323,6 +323,14 @@ function stopTimer() {
 }
 
 // Pydective Chat Integration
+function askQuickPrompt(text) {
+    const input = document.getElementById("chat-input-field");
+    if (input) {
+        input.value = text;
+        sendChatMessage();
+    }
+}
+
 async function sendChatMessage() {
     const input = document.getElementById("chat-input-field");
     const container = document.getElementById("chat-messages-container");

@@ -97,28 +97,41 @@ def classify_image_semantics(
     text_lower = page_text.lower()
 
     # 1. Reglas de firma manuscrita:
-    # Trazo vectorial o imagen apaisada en tercio inferior de página o cerca de etiquetas de firma
     is_lower_third = y_center > 450
     has_signature_text = any(
         kw in text_lower for kw in ("firma", "firmado", "rubrica", "representante", "arrendador", "arrendatario", "cedula")
     )
-    if (image_meta.tipo_fisico == "vector" or aspect_ratio >= 1.4) and (is_lower_third or has_signature_text):
+    if (image_meta.tipo_fisico == "vector" or (1.4 <= aspect_ratio <= 4.0)) and (is_lower_third or has_signature_text):
         return "firma_manuscrita"
+
+    # 0. Reglas de código de barras y códigos QR:
+    has_barcode_text = any(
+        kw in text_lower for kw in ("radicado", "codigo de barras", "barcode", "rad-", "barras")
+    )
+    if (aspect_ratio >= 3.5 and h <= 80) or (has_barcode_text and aspect_ratio >= 2.0):
+        return "codigo_barras"
 
     # 2. Reglas de sello oficial:
     # Aspecto casi cuadrado o circular (aspect ratio entre 0.7 y 1.4) con texto notarial/estatal
     has_seal_text = any(
-        kw in text_lower for kw in ("sello", "notaria", "notario", "alcaldia", "republica", "registraduria", "apostilla")
+        kw in text_lower for kw in ("sello", "notaria", "notaría", "notario", "alcaldia", "republica", "registraduria", "apostilla", "autenticado")
     )
     if 0.7 <= aspect_ratio <= 1.4 and (has_seal_text or is_lower_third):
         return "sello_oficial"
 
-    # 3. Reglas de logotipo:
-    # Ubicado en la cabecera del documento (y_center < 150)
+    # 3. Reglas de fotografía pericial o inspección:
+    has_photo_text = any(
+        kw in text_lower for kw in ("foto", "fotografia", "inspeccion", "evidencia", "rack", "servidor", "gps", "visita")
+    )
+    if (w >= 180 and h >= 100) and has_photo_text:
+        return "fotografia"
+
+    # 4. Reglas de logotipo:
+    # Ubicado en la cabecera del documento (y_center < 160)
     if y_center <= 160:
         return "logotipo"
 
-    # 4. Diagrama / Gráfico general
+    # 5. Diagrama / Gráfico general
     return "diagrama"
 
 

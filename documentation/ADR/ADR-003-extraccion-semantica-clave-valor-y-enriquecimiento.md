@@ -98,7 +98,7 @@ Cada valor extraído se entrega en dos formatos:
 
 ### 2.5 Vinculación con Evidencias Visuales (Visual Grounding)
 
-Cuando una página contenga elementos del catálogo visual (sellos, firmas manuscritas, logos) detectados por el [ADR-002](file:///home/dypok/Projects/PyDective/docs/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md), el motor cruzará la posición de la clave-valor con la imagen más cercana en la misma página:
+Cuando una página contenga elementos del catálogo visual (sellos, firmas manuscritas, logos) detectados por el [ADR-002](file:///home/dypok/Projects/PyDective/documentation/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md), el motor cruzará la posición de la clave-valor con la imagen más cercana en la misma página:
 - Permite responder preguntas de auditoría como: *"¿El valor total está respaldado por firma en la misma página?"*.
 
 ---

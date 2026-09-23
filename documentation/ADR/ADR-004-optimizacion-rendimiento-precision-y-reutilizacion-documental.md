@@ -3,7 +3,7 @@
 - **Estado:** Propuesto — pendiente de validación mediante benchmark
 - **Fecha:** 2026-09-23
 - **Decisores:** Equipo de Arquitectura e Ingeniería Pydective
-- **Extiende a:** [ADR-001: Arquitectura híbrida de extracción, caché escalonada y failover por página](file:///home/dypok/Projects/PyDective/docs/ADR/ADR-001-arquitectura-hibrida-caching-y-failover.md), [ADR-002: Preprocesamiento determinista, visión y chat documental](file:///home/dypok/Projects/PyDective/docs/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md) y [ADR-003: Extracción semántica clave-valor y enriquecimiento](file:///home/dypok/Projects/PyDective/docs/ADR/ADR-003-extraccion-semantica-clave-valor-y-enriquecimiento.md)
+- **Extiende a:** [ADR-001: Arquitectura híbrida de extracción, caché escalonada y failover por página](file:///home/dypok/Projects/PyDective/documentation/ADR/ADR-001-arquitectura-hibrida-caching-y-failover.md), [ADR-002: Preprocesamiento determinista, visión y chat documental](file:///home/dypok/Projects/PyDective/documentation/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md) y [ADR-003: Extracción semántica clave-valor y enriquecimiento](file:///home/dypok/Projects/PyDective/documentation/ADR/ADR-003-extraccion-semantica-clave-valor-y-enriquecimiento.md)
 - **Relacionado con:** Requisitos del Sistema, PRD y Especificación Arquitectónica General
 - **Etiquetas:** pydective, rendimiento, precision, benchmark, cache, retrieval, grounding, evidencia, OCR, vision, adaptive-routing
 

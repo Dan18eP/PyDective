@@ -9,13 +9,13 @@
 
 ## 1. Resumen
 
-**Pydective** es un motor inteligente de extracción, catalogación visual y análisis conversacional de documentos PDF. Permite a un usuario cargar un PDF, buscar parámetros clave (ej. `factura, fecha, total, NIT`), catalogar elementos gráficos e **interrogar conversacionalmente al documento** como un detective forense documental, recibiendo hallazgos y respuestas estructuradas por página.
+**Pydective** es un motor inteligente de extracción, catalogación visual y análisis conversacional de documentos PDF de cualquier naturaleza (contratos, pólizas, actas, historias clínicas, expedientes, facturas o especificaciones técnicas). Permite a un usuario cargar un PDF, buscar cualquier parámetro de interés (ej. `arrendatario`, `clausula penal`, `diagnostico`, `vigencia`, `radicado`, `total`, `NIT`, `fecha de vencimiento`), catalogar elementos gráficos e **interrogar conversacionalmente al documento** como un detective forense documental, recibiendo hallazgos y respuestas estructuradas por página.
 
 El producto funciona tanto con PDFs digitales como con escaneos de baja calidad, documentos inclinados (*skewed*), manchados o mixtos. Aplica un principio estricto de **"Determinismo antes de IA"**: utiliza visión por computadora clásica (binarización Otsu y corrección de inclinación Deskew) antes de acudir a modelos multimodales, reduciendo ruido, costes y latencia.
 
 La promesa de Pydective es:
 
-> Encuentra datos clave, cataloga firmas y sellos, e interroga a tus PDFs digitales o escaneados en segundos, con trazabilidad exacta por página y sin reprocesar trabajo.
+> Encuentra datos clave, cataloga firmas y sellos, e interroga a cualquier PDF digital o escaneado en segundos, con trazabilidad exacta por página y sin reprocesar trabajo.
 
 ---
 

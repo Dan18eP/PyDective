@@ -15,16 +15,10 @@ El producto combina visión por computadora determinista (corrección de inclina
 
 La ventaja competitiva se concentra en cuatro atributos:
 
-1. **Determinismo antes de IA directa:** Se corrigen las imperfecciones visuales (Deskew + Otsu) con visión por computadora clásica, reduciendo el gasto innecesario de tokens de IA y disparando la precisión.
-2. **Identificación forense de imágenes:** Cada firma, sello oficial y logotipo queda catalogado con su número de página y descripción.
-3. **Interrogatorio conversacional (Pydective):** No solo busca palabras clave; permite conversar con el PDF para deducciones y análisis complejos basados en evidencia.
-4. **Velocidad y economía unitaria:** Triple caché (L0/L1/L2) que permite reconsultas instantáneas (<20 ms) y costos marginales decrecientes.
-
-La ventaja competitiva se concentra en tres atributos:
-
-1. **Velocidad percibida:** el sistema evita procesar de nuevo documentos y páginas que ya puede resolver localmente o desde caché.
-2. **Robustez ante documentos imperfectos:** puede trabajar con PDFs digitales, mixtos y escaneados con ruido.
-3. **Resultados accionables:** entrega hallazgos estructurados por página, no una masa de texto sin organizar.
+1. **Determinismo antes de IA directa:** Se corrigen las imperfecciones visuales (Deskew acotado + Otsu) con visión por computadora clásica, reduciendo el gasto innecesario de tokens de IA y disparando la precisión.
+2. **Identificación forense de imágenes:** Cada firma manuscrita, sello oficial y logotipo queda catalogado con su número de página y descripción semántica.
+3. **Interrogatorio conversacional (Pydective Chat):** No solo busca parámetros; permite conversar con el PDF para deducciones y análisis complejos fundamentados con citas obligatorias por página.
+4. **Velocidad y economía unitaria:** Triple caché (L0/L1/L2) con serialización ultra-rápida en `orjson` que permite reconsultas instantáneas (<20 ms) y costos marginales mínimos.
 
 ---
 

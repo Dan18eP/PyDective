@@ -29,36 +29,37 @@ Tras la definición de la arquitectura base en ADR-001, la dirección del proyec
 
 ## 2. Decisiones Arquitectónicas
 
-### 2.1 Visión por Computadora Determinista: Deskew y Binarización Otsu Obligatorios
+### 2.1 Visión por Computadora Determinista: Deskew y Binarización Otsu Optimizados
 
 Se establece como regla obligatoria de arquitectura: **Determinismo antes de IA**.
 
-Antes de clasificar una página escaneada como dependiente de IA o enviarla a la Fase B, se procesará mediante un pipeline determinista en CPU utilizando `opencv-python-headless`:
+Para evitar penalizaciones innecesarias de CPU, se aplican las siguientes reglas de diseño en `vision_service.py` con `opencv-python-headless`:
+
+1. **Bypass en páginas digitales limpias:** Si la Fase A detecta texto digital nativo suficiente (>80 palabras legibles), **no se ejecuta ningún algoritmo de visión ni OpenCV**.
+2. **Deskew Selectivo y Acelerado:**
+   - La búsqueda de ángulo de inclinación se acota estrictamente a un rango de **$\pm 15^\circ$** (un documento escaneado raramente supera los $10^\circ$; buscar a $90^\circ$ o $360^\circ$ multiplica por 6 el coste de CPU y arriesga rotar verticalmente texto horizontal).
+   - El cálculo de la Transformada de Hough / momentos se realiza sobre una miniatura reducida a **500 px de ancho**; luego, el ángulo obtenido se aplica a la matriz de rotación de la imagen en alta resolución. Esto ahorra hasta un 75% del tiempo de CPU.
+3. **Binarización de Otsu Adaptativa:**
+   - Solo se aplica ante bajo contraste o detección de ruido de fondo.
+   - Si la página limpia resultante permite extracción determinista con alta certeza, se resuelve localmente. Si contiene sellos, firmas o ambigüedad visual, pasa a Fase B optimizada.
 
 ```text
-Página escaneada / sospechosa de ruido
+Página escaneada o con texto deficiente (needs_ai)
   │
   ▼
-1. Estimación y Corrección de Inclinación (Deskew)
-   - Detección de líneas/bordes o momentos de contorno / transformada de Hough.
-   - Cálculo del ángulo dominante de orientación del texto.
-   - Rotación inversa de la imagen para alinear las líneas de texto horizontalmente.
+1. Estimación de Deskew (miniatura 500px, ángulo ∈ [-15°, +15°])
+2. Rotación inversa de alineación
+3. Binarización de Otsu (remoción de sombras y artefactos)
   │
   ▼
-2. Binarización de Otsu
-   - Conversión a escala de grises.
-   - Cálculo automático del umbral óptimo de intensidad minimizando la varianza intraclase.
-   - Eliminación de fondos oscuros, sombras de escaneo y artefactos de compresión.
-  │
-  ▼
-3. Evaluación Heurística Post-Limpieza
-   - Si la página limpia permite extracción determinista suficiente sin ambigüedad visual → Resuelve localmente (0 costo de IA).
-   - Si la página requiere descripción semántica visual o contiene sellos/firmas/manuscrito complejo → Pasa a Fase B optimizada.
+Evaluación de señal:
+  ├── [Texto limpio resoluble] → Extracción determinista (0 costo IA)
+  └── [Requiere OCR profundo / Sellos / Firmas] → Envío a Fase B (Gemini 2.0 Flash)
 ```
 
 **Beneficios:**
 - La imagen enviada al modelo multimodal en Fase B tiene un ratio señal/ruido drásticamente superior, reduciendo tokens de atención y errores de transcripción en un 30-50%.
-- Se habilita la posibilidad de resolver más páginas localmente sin incurrir en costos de red ni cuota de API.
+- El preprocesamiento determinista añade menos de 25-40 ms de CPU gracias al cálculo en miniatura y rango acotado.
 
 ---
 
@@ -119,6 +120,8 @@ Gemini Chat Engine (Prompt de Detective Documental con Grounding Estricto):
   - Rol: "Pydective", asistente forense y detective de documentos.
   - Regla: Toda afirmación debe citar explícitamente [Página X].
   - Si un dato no existe en el documento, debe declarar explícitamente su ausencia sin alucinar.
+  - Configuración de Latencia: thinking_budget=0 (sin espera de CoT) y temperature=0.0.
+  - Streaming de Respuesta: Emite tokens en streaming para lograr un Time-To-First-Token (TTFT) <600 ms.
   │
   ▼
 Respuesta estructurada al usuario:
@@ -133,18 +136,18 @@ Respuesta estructurada al usuario:
 
 ### 2.4 Mitigación de Riesgos Operativos
 
-#### A. Timeout en Navegadores (PDFs Escaneados Largos)
-- Se añade el endpoint de streaming reactivo: `GET /procesar/stream?session_id=...` mediante **Server-Sent Events (SSE)**.
-- El servidor procesa concurrentemente con su semáforo habitual y emite eventos en tiempo real:
-  - `event: page_completed` con el estado y hallazgos de cada página a medida que finaliza.
-  - `event: job_completed` con la consolidación final.
-- El endpoint sincrónico `POST /procesar` se mantiene para clientes directos o scripts simples, con un timeout HTTP configurable ampliado a 90 segundos.
+#### A. Timeout en Navegadores y Arquitectura Unificada de Streaming (SSE)
+- Para evitar duplicación de lógica y condiciones de carrera, el orquestador principal (`jobs.process_pdf()`) se diseña como un **generador asíncrono (`AsyncGenerator`)** que emite eventos atómicos (`JobEvent`).
+- **Endpoint SSE:** `GET /procesar/stream?session_id=...` retransmite los eventos en vivo mediante Server-Sent Events:
+  - `event: page_completed` con el estado y hallazgos de cada página a medida que finaliza en paralelo.
+  - `event: job_completed` con la consolidación final y escritura de caché L0/L1.
+- **Endpoint Sincrónico:** `POST /procesar` consume internamente el mismo generador hasta agotar los eventos y renderiza `resultados.html` para clientes estándar.
 
 #### B. Desacoplamiento y Modo Degradado de Redis
 - Se implementa una interfaz abstracta `BaseCacheService`.
 - Se dispone de dos implementaciones:
-  1. `RedisCacheService` (producción por defecto).
-  2. `InMemoryLRUCacheService` (fallback automático si `REDIS_ENABLED=false` o si Redis no responde en el arranque).
+  1. `RedisCacheService` (producción por defecto con serialización `orjson`).
+  2. `InMemoryLRUCacheService` (fallback automático si `REDIS_ENABLED=false` o si Redis no responde en el arranque, acotado con límite LRU de 100 documentos para prevenir saturación de RAM).
 - El sistema nunca aborta la inicialización si Redis está caído; entra en modo degradado informando en logs estructurados.
 
 #### C. Control de Cuota Multiproducto en Gemini

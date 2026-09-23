@@ -12,14 +12,15 @@
 
 En las versiones previas de la arquitectura, la búsqueda por parámetros (ej. `factura, total, fecha, NIT`) operaba predominantemente como un conteo y localización léxica de coincidencias dentro del texto extraído de cada página.
 
-Sin embargo, para usuarios operativos reales (analistas contables, jurídicos y auditores), saber que *"la palabra 'total' aparece 3 veces en la página 2"* resulta insuficiente y frustrante. En flujos de negocio, el usuario busca una etiqueta porque **desea conocer el valor o entidad asociada a dicha etiqueta**:
-- Si busca `total`, necesita el monto económico (`$4.580.000 COP`).
-- Si busca `NIT`, necesita el código de identificación tributaria (`900.123.456-7`).
-- Si busca `fecha`, necesita la fecha estandarizada de emisión o vencimiento (`2024-04-30`).
+Sin embargo, para usuarios operativos reales (analistas contables, jurídicos, médicos y auditores en cualquier industria), saber que *"la palabra 'total' aparece 3 veces"* o *"la palabra 'arrendador' aparece en la página 1"* resulta insuficiente y frustrante. En flujos de negocio reales con cualquier tipo documental (contratos, pólizas, actas, expedientes o facturas), el usuario busca una etiqueta porque **desea conocer el valor, cláusula o entidad asociada a dicha etiqueta**:
+- Si busca `total` o `importe`, necesita el monto económico (`$4.580.000 COP`).
+- Si busca `arrendatario` o `representante legal`, necesita la entidad o nombre de la persona jurídica o natural.
+- Si busca `NIT` o `cédula`, necesita el código de identificación tributaria o personal (`900.123.456-7`).
+- Si busca `fecha`, `emisión` o `vencimiento`, necesita la fecha estandarizada (`2024-04-30`).
 - Si busca `penalidad` o `vigencia`, necesita el fragmento o cláusula completa que estipula las condiciones, no solo la mención aislada de la palabra.
-- Si el documento utiliza sinónimos como `Importe a pagar`, `Saldo neto` o `Grand Total`, una búsqueda estrictamente literal arroja un falso negativo (0 resultados).
+- Si el documento utiliza sinónimos como `Importe a pagar`, `Saldo neto` o `Grand Total`, o si hay variaciones de tildes (`resolución` vs `resolucion`), una búsqueda estrictamente literal arroja un falso negativo (0 resultados).
 
-Se requiere evolucionar el motor de búsqueda de Pydective hacia un sistema de **extracción semántica enriquecida** que combine alta velocidad, rigor determinista y comprensión contextual.
+Se requiere evolucionar el motor de búsqueda de Pydective hacia un sistema de **extracción semántica enriquecida universal** que combine alta velocidad, rigor determinista y comprensión contextual para cualquier parámetro ingresado por el usuario.
 
 ---
 
@@ -27,36 +28,48 @@ Se requiere evolucionar el motor de búsqueda de Pydective hacia un sistema de *
 
 Adoptar un pipeline de **Extracción Clave-Valor Enriquecida, Ventana de Contexto (KWIC) y Normalización de Entidades**, gobernado por las siguientes definiciones arquitectónicas:
 
-### 2.1 Pipeline de Dos Etapas: Determinismo Espacial + Asistencia Semántica
+### 2.1 Normalización Lingüística y Tolerancia a Diacríticos (NFKD)
 
-El sistema implementará un enfoque escalonado para extraer el valor asociado a cada parámetro:
+Toda comparación y búsqueda de parámetros debe ser inmune a diferencias de acentuación, mayúsculas y ligaduras tipográficas:
+- **Descomposición canónica NFKD:** Mediante `unicodedata.normalize('NFKD', ...)`, términos como `"facturación"`, `"número"` o `"póliza"` coinciden de manera exacta con `"facturacion"`, `"numero"` o `"poliza"`.
+- **Expansión de ligaduras:** Reemplazo determinista de caracteres especiales de fuentes PDF (`ﬁ` $\to$ `fi`, `ﬂ` $\to$ `fl`, `æ` $\to$ `ae`).
+- **Límites de palabra (`\b`):** Coincidencia mediante límites de palabra regex para prevenir falsos positivos (evitar que `"IVA"` coincida con `"PRIVADO"`).
+
+---
+
+### 2.2 Pipeline de Dos Etapas: Determinismo Espacial $O(N)$ + Asistencia Semántica
+
+El sistema implementará un enfoque escalonado para extraer el valor asociado a cualquier parámetro:
 
 ```text
-Parámetro solicitado (ej. "total")
+Parámetro solicitado por el usuario (ej. "total", "arrendador", "vencimiento")
   │
   ▼
-Etapa 1: Expansión de Sinónimos e Intención
-  - Diccionario canónico de alias: "total" → ["total", "total a pagar", "importe", "saldo", "valor total", "grand total"]
+Etapa 1: Expansión de Sinónimos Canónicos (Opcional según catálogo base)
+  - Diccionario canónico o tokenización directa del parámetro.
   │
   ▼
-Etapa 2: Análisis Determinista Espacial (PyMuPDF en C)
-  - Detección de Bounding Boxes de las palabras clave candidatas.
-  - Evaluación de vecindad geométrica:
-    * Vector horizontal derecho (misma línea de texto, distancia ≤ umbral).
-    * Vector vertical inferior (misma columna o celda de tabla adyacente).
-  - Aplicación de expresiones regulares de extracción de entidades (monedas, fechas, NITs, porcentajes).
+Etapa 2: Análisis Determinista Espacial O(N) con PyMuPDF
+  - Extracción de palabras estructuradas con page.get_text("words"): (x0, y0, x1, y1, palabra, block_no, line_no, word_no).
+  - Detección espacial por vecindad geométrica en C:
+    * Vector horizontal derecho: Misma línea de texto (line_no idéntico), x0_valor > x1_clave, distancia ≤ umbral.
+    * Vector vertical inferior: Celda o línea adyacente directamente debajo (coincidencia de columna en tablas).
+  - Parser robusto de entidades y formatos:
+    * Monedas: Soporte nativo para separadores hispanos ($ 4.500.000,00) y anglosajones ($4,500,000.00).
+    * Fechas: DD/MM/YYYY, YYYY-MM-DD, o textuales ("30 de abril de 2024").
+    * Identificaciones: NIT con dígito de verificación, cédulas, códigos alfanuméricos.
   │
-  ├── [Éxito local con alta certeza] → Asignación clave-valor determinista (0 costo IA, <5 ms).
+  ├── [Éxito local con alta certeza] → Asignación clave-valor determinista (0 costo IA, <2 ms).
   └── [Incertidumbre / Layout complejo / Escaneo] → Delegación a Etapa 3.
   │
   ▼
-Etapa 3: Extracción Semántica Asistida (Fase B / Gemini Estructurado)
-  - En páginas `needs_ai` o donde la relación espacial sea ambigua, el prompt multimodal extrae parejas (clave, valor) asociadas explícitamente en el JSON Schema de la página.
+Etapa 3: Extracción Semántica Asistida (Fase B / Gemini 2.0 Flash Estructurado)
+  - En páginas needs_ai o escaneadas, el prompt multimodal extrae la pareja (clave, valor) guiado por el JSON Schema tipado.
 ```
 
 ---
 
-### 2.2 Ventana de Contexto Forense (KWIC)
+### 2.3 Ventana de Contexto Forense (KWIC)
 
 Cada hallazgo no se presentará como una palabra suelta, sino acompañado de su **oración o cláusula contextual completa** (Key Word in Context):
 - Se extrae la oración delimitada por signos de puntuación (`.` `\n` `;`) que contiene la coincidencia.
@@ -64,7 +77,7 @@ Cada hallazgo no se presentará como una palabra suelta, sino acompañado de su 
 
 ---
 
-### 2.3 Tipificación y Normalización de Datos
+### 2.4 Tipificación y Normalización de Datos
 
 Cada valor extraído se entrega en dos formatos:
 1. **Representación textual cruda:** tal como aparece en el documento (ej. `$ 14.500.000,00`).
@@ -73,12 +86,13 @@ Cada valor extraído se entrega en dos formatos:
    - `date`: `{ "fecha_iso": "2024-04-30", "tipo": "vencimiento" }`
    - `tax_id`: `{ "numero": "900123456", "digito_verificacion": "7", "pais": "CO" }`
    - `percentage`: `{ "valor": 1.5, "base": "mensual" }`
+   - `text`: Para nombres propios, cláusulas, descripciones o códigos alfanuméricos generales.
 
 ---
 
-### 2.4 Vinculación con Evidencias Visuales (Visual Grounding)
+### 2.5 Vinculación con Evidencias Visuales (Visual Grounding)
 
-Cuando una página contenga elementos del catálogo visual (sellos, firmas manuscritas, logos) detectados por el [ADR-002](file:///c:/Users/LENOVO/Documents/DANI%20DOCS/RIWI/IA%20FOR%20DEVS/PyDective/docs/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md), el motor cruzará la posición de la clave-valor con la imagen más cercana en la misma página:
+Cuando una página contenga elementos del catálogo visual (sellos, firmas manuscritas, logos) detectados por el [ADR-002](file:///home/dypok/Projects/PyDective/docs/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md), el motor cruzará la posición de la clave-valor con la imagen más cercana en la misma página:
 - Permite responder preguntas de auditoría como: *"¿El valor total está respaldado por firma en la misma página?"*.
 
 ---

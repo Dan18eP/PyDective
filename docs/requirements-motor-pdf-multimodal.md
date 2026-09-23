@@ -73,9 +73,9 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 
 | ID | Requisito | Criterio verificable |
 |---|---|---|
-| RF-010 | El usuario debe poder ingresar uno o más parámetros separados por coma. | `factura, fecha, total` se convierte en tres parámetros. |
+| RF-010 | El usuario debe poder ingresar uno o más parámetros separados por coma. | `arrendador, clausula, fecha, total` se convierte en cuatro parámetros. |
 | RF-011 | El sistema debe eliminar espacios sobrantes antes y después de cada parámetro. | ` factura ` se procesa como `factura`. |
-| RF-012 | La búsqueda no debe diferenciar mayúsculas y minúsculas. | `TOTAL` y `total` producen el mismo criterio de búsqueda. |
+| RF-012 | La búsqueda no debe diferenciar mayúsculas, minúsculas ni acentos diacríticos (normalización NFKD). | `TOTAL` y `total`, o `Facturación` y `facturacion` producen el mismo criterio canónico. |
 | RF-013 | El sistema debe eliminar parámetros vacíos. | `factura,, total,` no produce elementos vacíos. |
 | RF-014 | El sistema debe eliminar parámetros duplicados. | `total, Total, total` genera un único criterio canónico. |
 | RF-015 | El sistema debe mantener una representación canónica de parámetros para caché. | Cambiar el orden o capitalización de keywords equivalentes produce la misma clave L0. |
@@ -102,10 +102,10 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-030 | El sistema debe abrir el PDF desde memoria para analizar sus páginas. | El pipeline opera sobre `bytes`; no necesita archivo temporal para el flujo normal. |
 | RF-031 | El sistema debe extraer texto nativo de cada página antes de decidir el uso de IA. | La clasificación local obtiene texto y señales por página. |
 | RF-032 | El sistema debe clasificar cada página como `local`, `empty` o `needs_ai`. | Toda página termina con uno de esos estados antes de consolidación. |
-| RF-033 | Una página con texto digital suficiente y sin análisis visual requerido debe resolverse localmente. | No genera pixmap ni solicitud de IA. |
+| RF-033 | Una página con texto digital suficiente y elementos gráficos menores (<15% del área, ej. logos/membretes) debe resolverse localmente. | No genera pixmap ni solicitud de IA a menos que el usuario solicite explícitamente pistas visuales. |
 | RF-034 | Una página digital sin coincidencias debe resolverse localmente con lista vacía de parámetros. | La ausencia de keyword no desencadena IA. |
 | RF-035 | Una página vacía sin contenido útil debe devolverse como resultado vacío. | No se llama a IA para una página vacía. |
-| RF-036 | Una página con texto insuficiente, escaneo o ruido debe marcarse `needs_ai`. | Se envía a Fase B solo si corresponde. |
+| RF-036 | Una página con texto insuficiente, escaneo o capa de OCR corrupta (caracteres de reemplazo \ufffd o palabras pegadas) debe marcarse `needs_ai`. | Se envía a Fase B solo si corresponde. |
 | RF-037 | Una página con contenido visual relevante debe marcarse `needs_ai` cuando la solicitud requiera descripción visual. | La política se aplica de forma consistente. |
 
 ### 4.5 Extracción multimodal
@@ -174,21 +174,21 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 
 | ID | Requisito | Criterio verificable |
 |---|---|---|
-| RF-090 | El sistema debe corregir la inclinación (*deskew*) de páginas escaneadas mediante técnicas deterministas antes de invocar IA. | Se detecta el ángulo dominante y se rota la imagen para horizontalizar el texto antes de evaluar legibilidad o llamar a Gemini. |
+| RF-090 | El sistema debe corregir la inclinación (*deskew*) de páginas escaneadas mediante técnicas deterministas antes de invocar IA, omitiendo páginas digitales limpias. | Se calcula el ángulo dominante en una miniatura (500 px) acotado a $\pm 15^\circ$ y se rota la imagen sin penalizar CPU en páginas con texto legible. |
 | RF-091 | El sistema debe aplicar binarización de Otsu a páginas escaneadas o con ruido visual para maximizar el contraste texto/fondo. | Se genera máscara binarizada minimizando varianza intraclasal previo a OCR/análisis visual. |
 | RF-092 | El sistema debe inventariar y catalogar todas las imágenes por página, indicando número de página, tipo (sello, firma, logo, diagrama, foto) y descripción de contenido. | El JSON de salida y la UI presentan la lista estructurada `imagenes_detectadas` por cada página. |
 | RF-093 | El sistema debe permitir al usuario conversar en lenguaje natural con el documento analizado mediante un endpoint de chat. | `POST /chat/{pdf_hash}` recibe pregunta y responde contextualmente fundamentado en L1/L2. |
 | RF-094 | Toda respuesta del chat debe incluir obligatoriamente citas y referencias al número de página de procedencia de cada evidencia. | La respuesta estructurada lista las páginas citadas y declina responder si el dato no figura en el documento. |
 | RF-095 | El sistema debe ofrecer un endpoint de streaming reactivo (SSE) para emitir el progreso página a página en tiempo real. | `GET /procesar/stream` emite eventos `page_completed` y `job_completed` mitigando timeouts HTTP en el cliente. |
 
-### 4.11 Extracción semántica enriquecida y clave-valor
+### 4.11 Extracción semántica enriquecida y clave-valor universal
 
 | ID | Requisito | Criterio verificable |
 |---|---|---|
-| RF-096 | El sistema debe extraer la entidad o valor asociado a cada parámetro buscado mediante análisis de proximidad geométrica espacial y expresiones regulares. | Se captura el valor numérico, código o nombre adyacente a la derecha o debajo de la etiqueta en la misma página o tabla. |
+| RF-096 | El sistema debe extraer la entidad, cláusula o valor asociado a cualquier parámetro dinámico buscado (no solo facturas) mediante vecindad geométrica espacial $O(N)$ y regex. | Se captura el valor numérico, código, nombre o cláusula adyacente a la derecha o debajo de la etiqueta en la misma página o tabla. |
 | RF-097 | El sistema debe suministrar una ventana de contexto forense (KWIC) con la oración o cláusula completa que contiene la coincidencia. | El campo `contexto_oracion` entrega la oración completa delimitada por puntuación lógica. |
 | RF-098 | El sistema debe soportar expansión semántica mediante diccionario de sinónimos canónicos para parámetros clave comunes. | Búsquedas como `total` recuperan automáticamente `importe`, `saldo`, `valor total` y `grand total`. |
-| RF-099 | El sistema debe tipificar y normalizar valores extraídos de monedas, fechas y números de identificación. | Se genera el sub-objeto `valor_normalizado` con tipos (`currency`, `date`, `tax_id`, `percentage`) estructurados para integración. |
+| RF-099 | El sistema debe tipificar y normalizar valores extraídos de monedas, fechas y números de identificación con soporte de formatos hispanos e internacionales. | Se genera el sub-objeto `valor_normalizado` con tipos (`currency`, `date`, `tax_id`, `percentage`, `text`) estructurados para integración. |
 
 ---
 

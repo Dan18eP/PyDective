@@ -71,20 +71,21 @@ Una sola apertura `fitz.open(stream=bytes)`. Para cada página, **solo** operaci
 
 | Señal | Umbral de diseño | Destino |
 |---|---|---|
-| Texto nativo largo y keywords presentes, sin imágenes | éxito local | no pixmap |
-| Texto nativo largo, keywords ausentes, sin imágenes | éxito local con lista vacía | no pixmap (no alucinar con IA si el PDF es digital) |
-| Página inclinada o fondo con sombras/ruido | Preprocesamiento determinista: Deskew + Otsu | Limpieza antes de evaluar |
+| Texto nativo largo y keywords presentes, logos <15% área | éxito local | no pixmap |
+| Texto nativo largo, keywords ausentes, logos <15% área | éxito local con lista vacía | no pixmap (no alucinar con IA si el PDF es digital) |
+| Página inclinada o fondo con sombras/ruido (needs_ai) | Preprocesamiento determinista: Deskew (±15°, miniatura 500px) + Otsu | Limpieza rápida antes de evaluar |
 | Post-Otsu: texto legible alcanzado | éxito local | no pixmap, 0 costo IA |
-| Poco texto / texto basura persistente / escaneo complejo | pendiente IA | pixmap 150 DPI |
-| Hay sellos, firmas, logos o imágenes a describir | catalogación image_service + pendiente IA | pixmap 150 DPI |
+| Poco texto / texto corrupto persistente / escaneo complejo | pendiente IA | Fase B optimizada |
+| Hay sellos, firmas manuscritas o solicitud visual explícita | catalogación image_service + pendiente IA | Fase B optimizada |
 
 Heurística de “texto basura” (producto, no magia):
 
 - pocos caracteres alfanuméricos por página, o  
-- alta ratio de reemplazos/control chars, o  
-- `get_images()` cubre casi todo el rect de la página.
+- alta ratio de reemplazos/control chars (`\ufffd`), o  
+- palabras sin separación léxica o promedio de longitud >30 chars, o  
+- `get_images()` cubre más del 50% del rect de la página con texto casi nulo.
 
-**Prohibido en fase A:** `get_pixmap`, Pillow, red.
+**Prohibido en fase A:** `get_pixmap`, Pillow, OpenCV en páginas digitales limpias, red.
 
 Concurrencia fase A: `asyncio.to_thread` / pool acotado al número de CPU, no a 20 ciegas. PyMuPDF no es siempre thread-safe sobre el **mismo** `Document`: o se itera en un hilo, o se abre un doc por worker. Decisión de implementación: **un hilo, loop de 20 páginas de texto es ~ms**; no vale la pena pelear el GIL aquí. El win es no pintar. [web:35]
 
@@ -96,19 +97,21 @@ Cierre de iteración: cada resultado local se construye con `pagina=i+1` y un di
 
 ### 4.1 Pixmap y WebP (CPU)
 
-- Solo páginas pendientes.  
-- DPI **150** como default de velocidad; 200 solo si la heurística marca texto minúsculo. 300+ está fuera de v1 (RAM nativa enorme). [web:35][web:43]
+- Solo páginas pendientes marcadas `needs_ai`.  
+- **Renderizado directo en C:** `page.get_pixmap(matrix=fitz.Matrix(scale, scale))` escalando directo al tamaño objetivo (max_dim ≤ 1024 px). Elimina el paso intermedio de renderizar a 150 DPI y redimensionar con Pillow.
+- Pre-acondicionamiento en `preprocess_service.py` (Deskew acotado a $\pm 15^\circ$ sobre miniatura 500px + Otsu si hay contraste bajo).
 - Liberar pixmap en cuanto existe el buffer WebP (`pix = None`).  
-- Thumbnail 1024 y WebP q70: el cuello pasa a ser **RTT de Gemini**, no el PNG.  
-- CPU en thread pool pequeño (2–4). Pintar 20 páginas a 150 DPI en serie en C suele ser más estable que 20 hilos peleando RAM.
+- WebP q75 en buffer de memoria: el cuello pasa a ser **RTT de Gemini**, no la transferencia de imagen.  
+- CPU en thread pool pequeño (2–4). Cada worker abre su propio handle `fitz.Document(stream=pdf_bytes)` para total thread-safety.
 
 ### 4.2 Ráfaga Gemini (I/O)
 
 - `asyncio.gather` **solo** de pendientes, no de las 20.  
-- Semáforo: `min(pendientes, keys_sanas, MAX_INFLIGHT)`.  
+- Semáforo: `min(pendientes, keys_sanas, MAX_INFLIGHT_POR_PROYECTO)`.  
   - `MAX_INFLIGHT` arranca en 4–8. Subir no linealiza: 429 serializa peor que un semáforo. [web:40]
 - Un WebP, N reintentos de key.  
-- `thinking` mínimo, JSON schema, `temperature` 0.1.  
+- `thinking_budget=0` (latencia mínima sin CoT innecesario), JSON schema estricto, `temperature` 0.0.  
+- Streaming reactivo SSE en `/procesar/stream` mediante `AsyncGenerator` compartido con `/procesar`.  
 - Batch API de Google **no** entra: es cola de horas, no request web. [web:31][web:32]
 
 ### 4.3 Keys y cuota

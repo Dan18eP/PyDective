@@ -16,7 +16,7 @@ El producto necesita procesar PDFs de aproximadamente 20 páginas desde una apli
 - Escaneos sin texto nativo.
 - Escaneos de baja calidad con ruido, sombras, manchas o compresión.
 
-El usuario proporciona parámetros de búsqueda, por ejemplo: `factura`, `fecha`, `total`, `NIT`, `vigencia` o códigos de operación. El sistema debe responder con hallazgos estructurados por página, incluyendo texto limpio, coincidencias y descripciones visuales relevantes cuando aplique.
+El usuario proporciona parámetros de búsqueda arbitrarios aplicables a cualquier tipo de documento (contratos, pólizas, historias clínicas, actas, escrituras, manifiestos, facturas o soportes técnicos): por ejemplo `arrendador`, `clausula penal`, `diagnostico`, `vigencia`, `radicado`, `total`, `NIT`, `fecha` o códigos de operación. El sistema debe responder con hallazgos estructurados por página, incluyendo texto limpio, valores asociados, coincidencias y descripciones visuales relevantes cuando aplique.
 
 Una arquitectura simple que envíe todas las páginas a una IA multimodal tiene problemas de velocidad, costo, cuota y resiliencia:
 
@@ -100,17 +100,17 @@ La Fase A no permite pixmaps, Pillow ni red.
 
 Solo las páginas `needs_ai` se renderizan y envían al proveedor multimodal.
 
-Configuración de referencia:
+Configuración de referencia de alta velocidad:
 
 ```text
-Pixmap: 150 DPI
-Thumbnail: máximo 1024 px
+Renderizado: Directo en C con fitz.Matrix(scale, scale) a max_dim ≤ 1024 px (sin doble paso en Pillow)
 Formato: WebP
-Calidad WebP: ~70
-Salida: JSON estructurado validado por esquema
+Calidad WebP: ~75
+Salida: JSON estructurado validado por esquema Pydantic
+Configuración Gemini: thinking_budget=0 (latencia mínima sin CoT innecesario), temperature=0.0
 ```
 
-El WebP se produce una sola vez por página y se reutiliza en reintentos de red o rotaciones de key.
+El WebP se produce una sola vez por página en un buffer en memoria y se reutiliza en reintentos de red o rotaciones de key.
 
 ### 6. Control de concurrencia
 
@@ -118,8 +118,8 @@ Se separan recursos CPU y red:
 
 | Recurso | Límite inicial |
 |---|---:|
-| Render WebP | 2–4 workers |
-| Gemini concurrente | 4–8 solicitudes, semáforo global |
+| Render WebP | 2–4 workers (con handles independientes de fitz.Document) |
+| Gemini concurrente | 4–8 solicitudes, semáforo global por project_id |
 | Páginas por PDF | ~20 en v1 |
 
 El semáforo Gemini es global al proceso/proyecto; no se lanza una ráfaga ilimitada por cada request. Los límites del proveedor pueden provocar `429 RESOURCE_EXHAUSTED`, por lo que controlar la concurrencia es parte de la latencia y de la confiabilidad. [web:31]
@@ -150,16 +150,17 @@ Las API keys del mismo proyecto no se consideran multiplicadores automáticos de
 L2 es una optimización opcional para reutilizar contenido multimodal en nuevas consultas del mismo PDF.
 
 - Se almacena un puntero `cache_name` junto con `pdf_hash`, `key_id` y `expire_at`.
+- **Salvaguarda de umbral mínimo:** Google exige un mínimo de ~32.768 tokens para crear un Context Cache. Si las páginas multimodales no alcanzan dicho umbral, la creación de L2 se omite de forma transparente para evitar errores `400 INVALID_ARGUMENT`.
 - Solo se usa con la misma key/proyecto que creó el recurso.
-- Se crea mediante la API oficial de caché y se referencia como contenido cacheado en solicitudes posteriores.
+- Se crea mediante la API oficial de caché (`client.caches.create`) y se referencia como `cached_content` en solicitudes posteriores.
 - Su TTL se respeta; si vence, se recrea u omite sin bloquear el trabajo.
 - L2 no reemplaza Redis L0/L1.
 
-El Context Cache se crea y usa con interfaces de caché del SDK, no mediante campos no verificados añadidos a la configuración de generación. [web:16][web:18][web:24]
+### 9. Persistencia de caché y serialización de alto rendimiento
 
-### 9. Persistencia de caché
-
-Redis (o equivalente) será el almacén de producción para L0 y L1. Un diccionario en RAM solo puede usarse en desarrollo local porque desaparece al reiniciar el proceso y no se comparte entre instancias.
+Redis (o equivalente) será el almacén de producción para L0 y L1. Para maximizar el rendimiento y reducir los tiempos de CPU en serialización de documentos con múltiples páginas:
+- Se utiliza `orjson` como motor de serialización/deserialización (5x-10x más veloz que el `json` estándar de Python).
+- Si Redis no está disponible o se deshabilita localmente, el sistema conmuta automáticamente a un modo degradado in-memory (`InMemoryLRUCacheService` con límite de tamaño LRU para evitar fugas de memoria).
 
 TTL inicial propuesto:
 
@@ -167,7 +168,7 @@ TTL inicial propuesto:
 |---|---:|
 | L0 | 24 horas o evicción LRU |
 | L1 | 24 horas o política de retención configurable |
-| L2 | TTL definido por proveedor, inicialmente ~60 minutos |
+| L2 | TTL definido por proveedor, inicialmente ~60 minutos (sujeto a umbral ≥32k tokens) |
 
 ### 10. Estructura de módulos
 

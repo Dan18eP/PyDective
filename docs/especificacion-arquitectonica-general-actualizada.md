@@ -201,39 +201,55 @@ fitz.open(stream=pdf_bytes, filetype="pdf")
 Por página, `classifier.py` realiza únicamente trabajo local barato:
 
 - extraer texto nativo;
-- evaluar calidad y densidad de texto;
-- detectar imágenes embebidas;
+- evaluar calidad y densidad de texto (detección de capas OCR corruptas, ratio de imprimibles y separación léxica);
+- detectar imágenes embebidas y calcular su porcentaje de área:
+  * Si las imágenes cubren <15% del área (logos/membretes) y el texto es abundante (>80 palabras), **se resuelve en `local`**.
+  * Solo si cubren >15% o el usuario solicita explícitamente pistas visuales (`firma`, `sello`, `logo`) se marca `needs_ai`.
 - detectar página vacía o visual;
 - decidir `local`, `empty` o `needs_ai`.
 
 | Condición | Resultado |
 |---|---|
-| Texto digital útil, sin necesidad visual | `local` |
+| Texto digital útil, sin necesidad visual (logos <15% área) | `local` |
 | Texto digital útil, pero no hay keyword | `local` con coincidencias vacías |
-| Texto insuficiente, basura o escaneo | `needs_ai` |
-| Imagen/diagrama/logo relevante para la solicitud | `needs_ai` |
+| Texto insuficiente, corrupto o escaneo | `needs_ai` |
+| Imagen/diagrama/sello/firma relevante para la solicitud | `needs_ai` |
 | Página vacía sin contenido aprovechable | `empty` |
 
-**Prohibido en Fase A:** renderizar pixmaps, usar Pillow o llamar a red.
+**Prohibido en Fase A:** renderizar pixmaps, usar Pillow, invocar OpenCV o llamar a red.
 
-### 4.6 Fase B: procesamiento multimodal selectivo
+### 4.6 Fase B: procesamiento multimodal selectivo optimizado
 
 Solo páginas marcadas `needs_ai` pasan a Fase B.
 
 Secuencia:
 
 ```text
-Página pendiente → Pixmap 150 DPI → thumbnail ≤1024 px → WebP q70 → Gemini → JSON estructurado
+Página pendiente
+  │
+  ▼
+1. Renderizado directo en C con fitz.Matrix(scale, scale) a max_dim ≤ 1024 px (sin doble paso en Pillow)
+  │
+  ▼
+2. Pre-acondicionamiento determinista en vision_service.py (OpenCV):
+   - Deskew selectivo en miniatura (500px), ángulo acotado a [-15°, +15°]
+   - Binarización de Otsu ante fondos oscuros o sombras de escaneo
+  │
+  ▼
+3. Conversión a WebP q75 en buffer de memoria
+  │
+  ▼
+4. Invocación asíncrona a Gemini 2.0 Flash:
+   - thinking_budget=0 (latencia mínima sin CoT innecesario)
+   - temperature=0.0
+   - JSON Schema estricto (Pydantic)
 ```
 
 Reglas:
 
-- DPI inicial: 150.
-- DPI 200: únicamente si la estrategia detecta texto pequeño y las métricas justifican el costo.
-- No usar 300+ DPI en v1.
-- El buffer WebP se crea una vez por página.
-- Un retry de red o failover reutiliza el mismo WebP.
-- Pixmap se libera tras obtener WebP para reducir presión de RAM.
+- El buffer WebP se crea una vez por página pendiente y se reutiliza en reintentos de red o failover.
+- En el pool de renderizado concurrente, cada worker instancia su propio handle de `fitz.Document` para evitar fallos de thread-safety en C.
+- La memoria de mapas de bits intermedios se libera inmediatamente tras obtener el buffer WebP.
 
 ### 4.7 Consolidación y salida
 
@@ -253,29 +269,31 @@ Reglas:
 
 | Capa | Almacén | Clave | Contenido | Ahorro principal |
 |---|---|---|---|---|
-| L0 | Redis | `hash + keywords` | Resultado de una consulta | Evita todo el pipeline |
-| L1 | Redis | `hash` | Extracción por página | Evita PyMuPDF, WebP e IA en nuevas búsquedas |
-| L2 | Context Cache Google | `hash + key_id` | Referencia `cache_name` + vencimiento | Reduce reenvío de contenido multimodal |
+| L0 | Redis (`orjson`) / In-Memory LRU | `hash + keywords` | Resultado de una consulta | Evita todo el pipeline |
+| L1 | Redis (`orjson`) / In-Memory LRU | `hash` | Extracción por página | Evita PyMuPDF, WebP e IA en nuevas búsquedas |
+| L2 | Context Cache Google | `hash + key_id` | Referencia `cache_name` + vencimiento | Reduce reenvío de contenido multimodal (requiere ≥32k tokens) |
 
 ### 5.2 Ciclo de escritura
 
 1. Fase A/B obtiene resultados por página.
 2. Se persiste L1 con contenido reusable de páginas exitosas.
-3. Se filtran keywords actuales sobre L1.
-4. Se escribe L0 con respuesta específica de la consulta.
-5. Si hubo páginas multimodales y aplica, se registra L2 para la key que creó el recurso.
+3. Se filtran keywords actuales sobre L1 mediante `semantic_extraction_service.py`.
+4. Se escribe L0 con respuesta específica de la consulta serializada con `orjson`.
+5. Si hubo páginas multimodales y el volumen de tokens de imagen supera el umbral de Google (~32.768 tokens), se registra L2 para la key que creó el recurso. De lo contrario, se omite de forma segura.
 
 Solo `jobs.py` escribe las capas de caché. Esto evita duplicados, condiciones de carrera y resultados inconsistentes.
 
-### 5.3 TTL e invalidación
+### 5.3 TTL, Persistencia y Resiliencia
 
 | Capa | TTL inicial propuesto | Se invalida por |
 |---|---:|---|
 | L0 | 24 horas / LRU | TTL, nuevo hash, borrado explícito |
 | L1 | 24 horas / política de retención | TTL, nuevo hash, borrado explícito |
-| L2 | TTL del proveedor, ~60 min inicial | Vencimiento, key inválida/agotada, nuevo hash |
+| L2 | TTL del proveedor, ~60 min inicial | Vencimiento, key inválida/agotada, nuevo hash, tokens <32k |
 
-La caché L2 no se reutiliza entre keys/proyectos distintos. El cache explícito de Google se crea con la API de `caches.create` y se referencia como `cached_content`; no se asume que un campo de versión en `GenerateContentConfig` active esta función. [web:16][web:18][web:24]
+- **Serialización con `orjson`:** Se adopta para todas las operaciones I/O de Redis por su velocidad extrema (5x-10x superior a `json`).
+- **Resiliencia de Caché con `BaseCacheService`:** Si Redis no está disponible, el sistema conmuta automáticamente a `InMemoryLRUCacheService` acotado a un máximo de 100 documentos para evitar agotamiento de memoria en el servidor.
+- La caché L2 no se reutiliza entre keys/proyectos distintos. Se crea con la API oficial `client.caches.create` y se referencia como `cached_content`.
 
 ---
 

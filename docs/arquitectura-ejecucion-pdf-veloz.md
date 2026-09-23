@@ -201,32 +201,56 @@ Si el timeout pisa el failover, se **devuelve parcial** (páginas OK + errores),
 
 ---
 
-## 8. Módulos y contratos (para que no se pisen)
+## 8. Módulos y contratos (Estructura oficial alineada con Especificación v2.1)
 
-```
+```text
 pydective/
-├── main.py               # Borde HTTP: SSE streaming (/procesar/stream), Chat (/chat), Jinja2
-├── jobs.py               # Orquestador único: hash → L0/L1 → Fase A → Fase B → persistencia
-├── classify.py           # Fase A: extracción nativa con PyMuPDF
-├── preprocess_service.py # Visión determinista: Deskew (Hough) + Binarización Otsu con OpenCV
-├── image_service.py      # Detección y catalogación forense de imágenes (firmas, sellos, logos)
-├── chat_service.py       # Pydective Chat: Grounding sobre L1 + Context Cache L2 con citas
-├── render.py             # Pixmap 150 DPI → WebP q70 en CPU
-├── gemini_io.py          # Llamada a Gemini Flash estructurado + retry y failover por página
-├── keys.py               # Pool con estados healthy/cooldown/exhausted/invalid + semáforo por proyecto
-├── cache.py              # Redis L0/L1/L2 + Fallback transparente InMemoryLRUCache
-├── models.py             # Modelos Pydantic (JobInput, JobOutput, ChatInput, ChatOutput)
-├── templates/            # UI Pydective con panel de hallazgos y chat interactivo
-└── static/
+├── app/
+│   ├── main.py                 # Borde HTTP: SSE streaming (/procesar/stream), Chat (/chat/{hash}), Jinja2
+│   ├── settings.py             # Configuración central: GEMINI_MODEL="gemini-2.0-flash", límites, timeouts
+│   ├── dependencies.py         # Inyección de dependencias FastAPI y lifecycle (startup/shutdown)
+│   │
+│   ├── domain/
+│   │   ├── models.py           # Modelos Pydantic v2: JobInput, JobOutput, ChatInput, ChatOutput, HallazgoEnriquecido
+│   │   ├── enums.py            # Enums: EstadoKey, TipoPagina, NivelCache, MetodoExtraccion
+│   │   └── errors.py           # Jerarquía de excepciones de dominio
+│   │
+│   ├── services/
+│   │   ├── jobs.py             # Orquestador único y singleflight: hash → L0/L1 → Fase A → Fase B → persistencia
+│   │   ├── classifier.py       # Fase A: extracción nativa con PyMuPDF y evaluación de legibilidad
+│   │   ├── preprocess_service.py # Visión determinista: Deskew acotado (Hough) + Binarización Otsu con OpenCV
+│   │   ├── image_service.py    # Detección y catalogación forense de imágenes (firmas, sellos, logos)
+│   │   ├── chat_service.py     # Pydective Chat: Grounding sobre L1 + historial multi-turno con citas
+│   │   ├── renderer.py         # Fase B CPU: fitz.Matrix directo a WebP q75 en thread pool
+│   │   ├── gemini_service.py   # Fase B red: gemini-2.0-flash con thinking_budget=0 + retry por página
+│   │   ├── key_pool.py         # Pool con estados healthy/cooldown/exhausted/invalid + BaseConcurrencyLimiter
+│   │   ├── cache_service.py    # BaseCacheService: Redis (orjson) + Fallback transparente InMemoryLRUCacheService
+│   │   └── semantic_extraction_service.py # Extracción espacial O(N), KWIC, sinónimos y normalización
+│   │
+│   ├── infrastructure/
+│   │   ├── redis_client.py     # Cliente Redis async y locks de Singleflight
+│   │   ├── gemini_client.py    # Fábrica de clientes google-genai persistentes
+│   │   └── observability.py    # Logs estructurados y métricas de latencia por fase
+│   │
+│   ├── templates/              # Vistas SSR: index.html y resultados.html con chat interactivo
+│   └── static/                 # Estilos y JavaScript para SSE y chat
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── fixtures/
+├── requirements.txt
+├── .env.example
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-`pipeline.py` único del borrador se **parte**: clasificación, render y red tienen costos distintos; mezclarlos impide medir y acelera peor.
+`jobs.py` es el único que escribe caché. Ningún módulo llama a Gemini por su cuenta. `classifier.py` no hace I/O ni pixmaps.
 
 Contrato interno:
 
 ```text
-JobInput  = { bytes, keywords[] }
-JobOutput = { hash, resultados[página], cache_hit: l0|l1|l2|none }
+JobInput  = { bytes, keywords[], request_id, timeout_deadline, catalogar_imagenes }
+JobOutput = { hash, resultados[página], cache_hit: l0|l1|l2|none, partial_result, metrics }
 ```
 
 `jobs.py` es el único que escribe caché. Así no hay doble write ni condiciones de carrera.

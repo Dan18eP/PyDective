@@ -319,14 +319,15 @@ inflight = min(páginas_pendientes, keys/proyectos_útiles, MAX_INFLIGHT_GEMINI)
 Valores iniciales:
 
 ```text
+GEMINI_MODEL = "gemini-2.0-flash"        # Modelo canónico unificado fijado para todo el sistema
 MAX_RENDER_WORKERS = 2–4
 MAX_INFLIGHT_GEMINI = 4–8
 MAX_PAGES = 20
 ```
 
-El semáforo es **global al proceso o al proyecto**, no exclusivo de un request. Así se protege el servicio ante múltiples usuarios y se reducen 429. Los límites de Gemini dependen de modelo, proyecto y nivel de uso; excederlos ocasiona `429 RESOURCE_EXHAUSTED`. [web:31]
+El semáforo es **global al proceso o al proyecto** mediante `BaseConcurrencyLimiter`, no exclusivo de un request. Así se protege el servicio ante múltiples usuarios concurrentes y se previenen errores `429 RESOURCE_EXHAUSTED`.
 
-### 6.3 Pool de API keys
+### 6.3 Pool de API keys y Política de Fallo
 
 Cada key posee estado y metadatos de salud:
 
@@ -346,10 +347,9 @@ Política de fallo:
 | 401 / 403 | Key a `invalid`; no repetirla |
 | 500 / 503 / timeout externo | Cooldown breve y retry acotado de la misma página |
 | 400 por request/schema | No rotar key; error aislado de esa página |
+| Expiración de Deadline Global | Cancelación segura: se abortan páginas en cola; tareas in-flight tienen gracia de 1.5s y se cancelan sin degradar la salud de la key (`healthy`). Se consolida `partial_result=True`. |
 
-Una key agotada en la página 19 no afecta las páginas 1–18. Se conserva el WebP de la página 19 y solo esa página rota hacia otra key.
-
-Varias keys del mismo proyecto no deben asumirse como multiplicador de cuota. El semáforo se dimensiona por proyectos y límites realmente disponibles, no por el número de páginas.
+Una key agotada en la página 19 no afecta las páginas 1–18. Se conserva el WebP de la página 19 y solo esa página rota hacia otra key. Varias keys del mismo proyecto no multiplican automáticamente la cuota.
 
 ---
 
@@ -360,12 +360,13 @@ Varias keys del mismo proyecto no deben asumirse como multiplicador de cuota. El
 ```text
 JobInput
 - pdf_bytes: bytes
-- keywords: list[str]              # ya normalizadas
+- keywords: list[str]                   # normalizadas canónicamente
 - request_id: str
 - timeout_deadline: datetime
+- catalogar_imagenes: bool = True       # catalogación forense activa por defecto
 ```
 
-### 7.2 Resultado por página
+### 7.2 Resultado por página y fórmula de confianza
 
 ```json
 {
@@ -374,7 +375,7 @@ JobInput
   "origen": "local",
   "datos": {
     "ocr_texto_limpio": "...",
-    "palabras_clave_encontradas": ["factura", "total"],
+    "palabras_clave_encontradas": ["total"],
     "hallazgos_enriquecidos": [
       {
         "parametro_solicitado": "total",
@@ -409,6 +410,14 @@ JobInput
 }
 ```
 
+**Fórmula de Confianza Determinista:**
+Para el método `espacial_determinista`:
+$$\text{confianza} = \text{base\_score} \times (1 - \text{penalización\_distancia}) \times \text{score\_regex}$$
+- $\text{base\_score} = 1.0$ (texto vectorial nativo) o $0.75$ (fallback de kerning apretado).
+- $\text{penalización\_distancia} = \min(0.25, (\text{distancia\_pt} / 180.0) \times 0.25)$.
+- $\text{score\_regex} = 1.0$ (entidad validada) o $0.85$ (texto genérico).
+- Rango: $[0.50, 1.00]$.
+
 Posibles valores de `origen`: `local`, `ia`, `cache_l1`, `empty`.
 
 Fallo aislado:
@@ -422,19 +431,36 @@ Fallo aislado:
 }
 ```
 
-### 7.3 Contratos del Módulo Pydective Chat
+### 7.3 Contratos del Módulo Pydective Chat (Multi-Turno)
 
 ```text
+ChatMessage
+- role: "user" | "model"
+- content: str
+- timestamp: datetime
+
 ChatInput
 - pdf_hash: str
 - pregunta: str
-- session_id: str (opcional)
+- session_id: str | None = None
+- historial: list[ChatMessage] = []      # memoria de los últimos turnos de conversación
 
 ChatOutput
 - respuesta: str
 - paginas_citadas: list[int]
 - evidencias_visuales: list[dict]
 - cache_hit: l1 | l2 | none
+- session_id: str
+```
+
+**Comportamiento ante hash no existente o expirado:**
+Si `pdf_hash` no se encuentra en L1 (documento nunca procesado o expirado tras TTL 24h), el endpoint responde **HTTP 404 Not Found**:
+```json
+{
+  "error": "DOCUMENT_NOT_FOUND_OR_EXPIRED",
+  "message": "El documento no se encuentra en el índice de memoria o su sesión ha expirado (TTL 24h). Por favor cargue el PDF nuevamente para iniciar un nuevo análisis.",
+  "pdf_hash": "..."
+}
 ```
 
 ### 7.4 Salida del job

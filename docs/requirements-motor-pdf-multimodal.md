@@ -102,11 +102,11 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-030 | El sistema debe abrir el PDF desde memoria para analizar sus páginas. | El pipeline opera sobre `bytes`; no necesita archivo temporal para el flujo normal. |
 | RF-031 | El sistema debe extraer texto nativo de cada página antes de decidir el uso de IA. | La clasificación local obtiene texto y señales por página. |
 | RF-032 | El sistema debe clasificar cada página como `local`, `empty` o `needs_ai`. | Toda página termina con uno de esos estados antes de consolidación. |
-| RF-033 | Una página con texto digital suficiente y elementos gráficos menores (<15% del área, ej. logos/membretes) debe resolverse localmente. | No genera pixmap ni solicitud de IA a menos que el usuario solicite explícitamente pistas visuales. |
+| RF-033 | Una página con texto digital suficiente y elementos gráficos exclusivamente decorativos o logotipos menores (<15% del área) debe resolver su texto localmente. | No genera pixmap para extracción de texto, preservando velocidad <200 ms. |
 | RF-034 | Una página digital sin coincidencias debe resolverse localmente con lista vacía de parámetros. | La ausencia de keyword no desencadena IA. |
 | RF-035 | Una página vacía sin contenido útil debe devolverse como resultado vacío. | No se llama a IA para una página vacía. |
 | RF-036 | Una página con texto insuficiente, escaneo o capa de OCR corrupta (caracteres de reemplazo \ufffd o palabras pegadas) debe marcarse `needs_ai`. | Se envía a Fase B solo si corresponde. |
-| RF-037 | Una página con contenido visual relevante debe marcarse `needs_ai` cuando la solicitud requiera descripción visual. | La política se aplica de forma consistente. |
+| RF-037 | Una página con presencia física de objetos gráficos con aspecto de sellos, firmas o esquemas (≥80x80 pt) debe ser procesada por `image_service.py` cuando `catalogar_imagenes=True`. | Se garantiza la catalogación forense independientemente de que la keyword del usuario mencione explícitamente "firma" o "sello". |
 
 ### 4.5 Extracción multimodal
 
@@ -260,12 +260,12 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RV-003 | Cabecera no compatible con PDF | Rechazar como archivo inválido |
 | RV-004 | Tamaño excedido | Rechazar antes de pipeline |
 | RV-005 | PDF corrupto o cifrado no soportado | Informar imposibilidad de procesamiento |
-| RV-006 | Más páginas que el máximo | Rechazar o aplicar política configurada |
-| RV-007 | Parámetros vacíos tras normalización | Rechazar y solicitar al menos uno |
+| RV-006 | Más páginas que el máximo (límite: 20 páginas) | Rechazo estricto HTTP 400 (`PAGE_LIMIT_EXCEEDED`) informando el límite |
+| RV-007 | Parámetros vacíos tras normalización | Rechazo estricto HTTP 400 (`EMPTY_SEARCH_PARAMETERS`) solicitando al menos uno |
 | RV-008 | Redis no disponible | Conmutar a modo degradado in-memory sin interrumpir ejecución |
 | RV-009 | Todas las keys inválidas o agotadas | Entregar páginas locales y marcar pendientes IA con error parcial |
 | RV-010 | Respuesta IA no cumple schema | Marcar error de página; no persistir L1 inválida |
-| RV-011 | Deadline global expirado | Cancelar solo pendientes seguras; consolidar parcial |
+| RV-011 | Deadline global expirado | Cancelar tareas en cola; conceder 1.5s de gracia a peticiones in-flight antes de abortar; mantener la API key como `healthy`; consolidar `partial_result=True` |
 | RV-012 | Inconsistencia o reescritura de L1 | Invalidar de inmediato punteros L2 asociados en Redis |
 
 ---
@@ -277,12 +277,12 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RC-001 | FastAPI sirve la aplicación web y Jinja2 renderiza vistas SSR en el MVP. |
 | RC-002 | PyMuPDF es el motor principal de extracción y render local en v1. |
 | RC-003 | Pillow procesa/consolida imagen y WebP para páginas multimodales. |
-| RC-004 | `google-genai` es el SDK previsto para el proveedor multimodal inicial. |
+| RC-004 | `google-genai` con el modelo canónico unificado `gemini-2.0-flash` es el proveedor multimodal fijado. |
 | RC-005 | Redis es la fuente de caché de producción para L0 y L1. |
 | RC-006 | Batch API no se utiliza para el endpoint interactivo `/procesar`; está orientada a procesamiento asíncrono masivo. [web:31][web:32] |
-| RC-007 | Context Cache se debe usar solo con API y campos verificados en la versión fijada del SDK. [web:16][web:18][web:24] |
+| RC-007 | Context Cache se debe usar solo con API y campos verificados en la versión fijada del SDK y cuando se superen los 32k tokens mínimos. |
 | RC-008 | No se usa un diccionario local como única caché de producción, pero sí como fallback de resiliencia in-memory. |
-| RC-009 | La concurrencia IA se controla antes de enviar solicitudes para reducir errores de cuota. [web:31] |
+| RC-009 | La concurrencia IA se controla por `project_id` antes de enviar solicitudes para reducir errores de cuota. |
 | RC-010 | `opencv-python-headless` y `numpy` constituyen la suite obligatoria para operaciones deterministas de visión (Deskew y Otsu). |
 
 ---

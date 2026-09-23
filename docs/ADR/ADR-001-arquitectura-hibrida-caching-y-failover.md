@@ -1,9 +1,9 @@
 # ADR-001: Arquitectura híbrida de extracción, caché escalonada y failover por página
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado (Extendido por [ADR-002](file:///c:/Users/LENOVO/Documents/DANI%20DOCS/RIWI/IA%20FOR%20DEVS/PyDective/docs/ADR/ADR-002-preprocesamiento-determinista-vision-y-chat-documental.md) y [ADR-003](file:///c:/Users/LENOVO/Documents/DANI%20DOCS/RIWI/IA%20FOR%20DEVS/PyDective/docs/ADR/ADR-003-extraccion-semantica-clave-valor-y-enriquecimiento.md))
 - **Fecha:** 2026-09-23
-- **Decisores:** Equipo del proyecto `app_pdf_veloz`
-- **Etiquetas:** arquitectura, pdf, OCR, IA multimodal, rendimiento, caché, resiliencia
+- **Decisores:** Equipo del proyecto `app_pdf_veloz` / `Pydective`
+- **Etiquetas:** arquitectura, pdf, OCR, IA multimodal, rendimiento, caché, resiliencia, otsu, deskew, chat, clave-valor
 
 ---
 

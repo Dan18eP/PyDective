@@ -1,9 +1,9 @@
 # Especificación Arquitectónica General
-## Sistema Ultra-Veloz de Extracción Multimodal Anti-Ruido
+## Pydective: Motor Inteligente, Visión Determinista y Detective Documental
 
-**Versión:** 2.0  
-**Estado:** arquitectura de referencia previa a implementación  
-**Propósito:** definir la estructura completa, los límites entre módulos, el flujo de ejecución y las decisiones de rendimiento del sistema.
+**Versión:** 2.1  
+**Estado:** arquitectura de referencia actualizada (extiende ADR-001 y ADR-002)  
+**Propósito:** definir la estructura completa, los límites entre módulos, el preprocesamiento determinista (Otsu/Deskew), catálogo de imágenes, chat documental y decisiones de resiliencia de Pydective.
 
 > Este documento sustituye cualquier especificación arquitectónica anterior que presente un flujo o una estructura diferente. Los fragmentos de código previos son ilustrativos y no son fuente de verdad.
 
@@ -59,44 +59,46 @@ Un PDF digital debe resolverse sin IA cuando sea posible. La IA multimodal se re
 
 ---
 
-## 3. Vista de alto nivel
+## 3. Vista de alto nivel (Pydective)
 
 ```text
-                            ┌─────────────────────────────┐
-                            │          Navegador          │
-                            │ Carga PDF + parámetros      │
-                            └──────────────┬──────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ FastAPI / main.py                                                    │
-│ Validación, tamaño, timeout, lectura RAM, request_id, Jinja2        │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │ JobInput
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ jobs.py — Orquestador                                                │
-│ hash → L0 → L1 → fase A → fase B → merge → persistencia             │
-└───────┬─────────────────────────────┬───────────────────────────────┘
-        │                             │
-        ▼                             ▼
-┌───────────────┐            ┌───────────────────────────────────────┐
-│ cache.py      │            │ Fase A: classifier.py                 │
-│ Redis L0/L1   │            │ PyMuPDF, texto nativo, decisión       │
-│ Google L2 ref │            └──────────────────┬────────────────────┘
-└───────────────┘                               │ pendientes IA
-                                                 ▼
-                              ┌──────────────────────────────────────┐
-                              │ Fase B                               │
-                              │ renderer.py → WebP                   │
-                              │ gemini_service.py → IA estructurada  │
-                              │ key_pool.py → cuota/failover         │
-                              └──────────────────┬───────────────────┘
+                            ┌──────────────────────────────────────────┐
+                            │                Navegador                 │
+                            │  Carga PDF + parámetros / Pydective Chat │
+                            └────────────────────┬─────────────────────┘
                                                  │
                                                  ▼
-                              ┌──────────────────────────────────────┐
-                              │ JobOutput / resultados.html          │
-                              └──────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ FastAPI / main.py                                                                      │
+│ Validación, límites, request_id, SSE streaming (/procesar/stream), Chat (/chat), Jinja2│
+└────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                         │ JobInput / ChatInput
+                                         ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ jobs.py — Orquestador                                                                  │
+│ hash → L0 → L1 → Fase A (fitz + Otsu/Deskew) → Fase B (WebP + IA) → Merge → Caché     │
+└───────┬────────────────────────────────┬───────────────────────────────┬───────────────┘
+        │                                │                               │
+        ▼                                ▼                               ▼
+┌───────────────┐        ┌───────────────────────────────┐     ┌─────────────────────────┐
+│ cache_service │        │ Fase A: classifier.py         │     │ chat_service.py         │
+│ Redis L0/L1   │        │ PyMuPDF + preprocess_service  │     │ Grounding sobre L1      │
+│ In-Memory Fall│        │ (Deskew Hough + Otsu OpenCV)  │     │ + Context Cache L2      │
+│ Google L2 ref │        │ + image_service (detección)   │     │ (Citas por página)      │
+└───────────────┘        └───────────────┬───────────────┘     └─────────────────────────┘
+                                         │ pendientes IA
+                                         ▼
+                         ┌───────────────────────────────┐
+                         │ Fase B                        │
+                         │ renderer.py → WebP q70        │
+                         │ gemini_service.py (Gemini 2.x)│
+                         │ key_pool.py (semáforo/cuota)  │
+                         └───────────────┬───────────────┘
+                                         │
+                                         ▼
+                         ┌───────────────────────────────┐
+                         │ JobOutput / resultados.html   │
+                         └───────────────────────────────┘
 ```
 
 ---
@@ -179,9 +181,16 @@ Si L1 existe, `keyword_service.py` filtra los parámetros nuevos sobre el texto 
 
 Este comportamiento evita una nueva pasada de PyMuPDF, renderizado WebP e IA cuando cambia la consulta sobre el mismo PDF.
 
-### 4.5 Fase A: clasificación local
+### 4.5 Fase A: clasificación local y visión determinista (Otsu & Deskew)
 
-Solo ocurre ante miss L0 y L1.
+Solo ocurre ante miss L0 y L1. Rige el principio fundamental: **Determinismo antes de IA directa**.
+
+Antes de renderizar o clasificar una página escaneada o con baja densidad de texto como `needs_ai`:
+1. `preprocess_service.py` aplica **Deskew** (detección del ángulo dominante de texto mediante transformada de Hough o momentos de contorno con OpenCV y rotación correctora).
+2. `preprocess_service.py` aplica **Binarización Otsu** (umbralización adaptativa para separar fondo manchado/sombras de los caracteres de texto).
+3. `image_service.py` inspecciona los objetos gráficos nativos (`page.get_images()`) y cataloga sellos, firmas, logos y diagramas con su posición y página.
+4. Si la página limpia tras Otsu + Deskew permite extracción determinista suficiente sin ambigüedad → Se resuelve como `local` (0 costo de IA).
+5. Solo si tras la limpieza persiste texto ilegible o se requiere interpretación semántica visual → Pasa a Fase B como `needs_ai` con imagen WebP preprocesada y libre de ruido.
 
 Una única apertura:
 
@@ -348,7 +357,36 @@ JobInput
   "datos": {
     "ocr_texto_limpio": "...",
     "palabras_clave_encontradas": ["factura", "total"],
-    "descripcion_de_imagenes_detectadas": []
+    "hallazgos_enriquecidos": [
+      {
+        "parametro_solicitado": "total",
+        "termino_encontrado": "Total a Pagar",
+        "valor_extraido": "$ 3.250.000 COP",
+        "valor_normalizado": {
+          "tipo": "currency",
+          "monto": 3250000.0,
+          "moneda": "COP"
+        },
+        "contexto_oracion": "El Total a Pagar antes de la fecha límite es de $ 3.250.000 COP.",
+        "confianza": 0.96,
+        "metodo_extraccion": "espacial_determinista",
+        "evidencia_visual_asociada": "img_p1_2"
+      }
+    ],
+    "imagenes_detectadas": [
+      {
+        "id_imagen": "img_p1_1",
+        "tipo": "logotipo",
+        "descripcion": "Logotipo corporativo de la empresa emisora",
+        "ubicacion_aproximada": "superior_izquierda"
+      },
+      {
+        "id_imagen": "img_p1_2",
+        "tipo": "sello_oficial",
+        "descripcion": "Sello notarial circular con fecha legible",
+        "ubicacion_aproximada": "inferior_derecha"
+      }
+    ]
   }
 }
 ```
@@ -366,7 +404,22 @@ Fallo aislado:
 }
 ```
 
-### 7.3 Salida del job
+### 7.3 Contratos del Módulo Pydective Chat
+
+```text
+ChatInput
+- pdf_hash: str
+- pregunta: str
+- session_id: str (opcional)
+
+ChatOutput
+- respuesta: str
+- paginas_citadas: list[int]
+- evidencias_visuales: list[dict]
+- cache_hit: l1 | l2 | none
+```
+
+### 7.4 Salida del job
 
 ```text
 JobOutput
@@ -384,7 +437,7 @@ JobOutput
 ## 8. Estructura de proyecto
 
 ```text
-app_pdf_veloz/
+pydective/
 │
 ├── app/
 │   ├── main.py                 # FastAPI, rutas, middleware, Jinja2
@@ -399,11 +452,14 @@ app_pdf_veloz/
 │   ├── services/
 │   │   ├── jobs.py             # Orquestador y único escritor de caché
 │   │   ├── classifier.py       # Fase A: texto + decisión de carril
+│   │   ├── preprocess_service.py # Visión determinista: Deskew (Hough) + Otsu
+│   │   ├── image_service.py    # Catálogo forense de imágenes (firmas, sellos, logos)
+│   │   ├── chat_service.py     # Pydective Chat: Q&A documental con citas por página
 │   │   ├── renderer.py         # Fase B CPU: pixmap → WebP
 │   │   ├── gemini_service.py   # Fase B red: IA y reintento por página
-│   │   ├── key_pool.py         # Pool, salud, cooldown, semáforo
-│   │   ├── cache_service.py    # L0, L1 y puntero L2
-│   │   └── keyword_service.py  # Normalización y filtro local
+│   │   ├── key_pool.py         # Pool, salud, cooldown, semáforo por proyecto
+│   │   ├── cache_service.py    # L0, L1, L2 + InMemoryLRUCache fallback
+│   │   └── semantic_extraction_service.py # Extracción clave-valor, sinónimos y KWIC
 │   │
 │   ├── infrastructure/
 │   │   ├── redis_client.py     # Cliente Redis y serialización
@@ -447,8 +503,10 @@ app_pdf_veloz/
 
 | Método | Ruta | Finalidad |
 |---|---|---|
-| GET | `/` | Mostrar formulario `index.html` |
-| POST | `/procesar` | Procesar PDF y devolver `resultados.html` |
+| GET | `/` | Mostrar formulario `index.html` (interfaz Pydective) |
+| POST | `/procesar` | Procesar PDF sincrónicamente y devolver `resultados.html` |
+| GET | `/procesar/stream` | Streaming reactivo SSE del procesamiento página por página |
+| POST | `/chat/{pdf_hash}` | Interrogar al PDF en lenguaje natural con citas por página |
 | GET | `/health` | Salud de aplicación y dependencias esenciales |
 
 Políticas de borde:

@@ -170,6 +170,26 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-083 | El sistema debe permitir identificar la causa de un resultado parcial. | Existe evento o campo de razón agregada. |
 | RF-084 | El sistema debe exponer endpoint de salud. | `GET /health` responde según estado de aplicación y dependencias esenciales. |
 
+### 4.10 Visión determinista, catalogación de imágenes y chat interactivo
+
+| ID | Requisito | Criterio verificable |
+|---|---|---|
+| RF-090 | El sistema debe corregir la inclinación (*deskew*) de páginas escaneadas mediante técnicas deterministas antes de invocar IA. | Se detecta el ángulo dominante y se rota la imagen para horizontalizar el texto antes de evaluar legibilidad o llamar a Gemini. |
+| RF-091 | El sistema debe aplicar binarización de Otsu a páginas escaneadas o con ruido visual para maximizar el contraste texto/fondo. | Se genera máscara binarizada minimizando varianza intraclasal previo a OCR/análisis visual. |
+| RF-092 | El sistema debe inventariar y catalogar todas las imágenes por página, indicando número de página, tipo (sello, firma, logo, diagrama, foto) y descripción de contenido. | El JSON de salida y la UI presentan la lista estructurada `imagenes_detectadas` por cada página. |
+| RF-093 | El sistema debe permitir al usuario conversar en lenguaje natural con el documento analizado mediante un endpoint de chat. | `POST /chat/{pdf_hash}` recibe pregunta y responde contextualmente fundamentado en L1/L2. |
+| RF-094 | Toda respuesta del chat debe incluir obligatoriamente citas y referencias al número de página de procedencia de cada evidencia. | La respuesta estructurada lista las páginas citadas y declina responder si el dato no figura en el documento. |
+| RF-095 | El sistema debe ofrecer un endpoint de streaming reactivo (SSE) para emitir el progreso página a página en tiempo real. | `GET /procesar/stream` emite eventos `page_completed` y `job_completed` mitigando timeouts HTTP en el cliente. |
+
+### 4.11 Extracción semántica enriquecida y clave-valor
+
+| ID | Requisito | Criterio verificable |
+|---|---|---|
+| RF-096 | El sistema debe extraer la entidad o valor asociado a cada parámetro buscado mediante análisis de proximidad geométrica espacial y expresiones regulares. | Se captura el valor numérico, código o nombre adyacente a la derecha o debajo de la etiqueta en la misma página o tabla. |
+| RF-097 | El sistema debe suministrar una ventana de contexto forense (KWIC) con la oración o cláusula completa que contiene la coincidencia. | El campo `contexto_oracion` entrega la oración completa delimitada por puntuación lógica. |
+| RF-098 | El sistema debe soportar expansión semántica mediante diccionario de sinónimos canónicos para parámetros clave comunes. | Búsquedas como `total` recuperan automáticamente `importe`, `saldo`, `valor total` y `grand total`. |
+| RF-099 | El sistema debe tipificar y normalizar valores extraídos de monedas, fechas y números de identificación. | Se genera el sub-objeto `valor_normalizado` con tipos (`currency`, `date`, `tax_id`, `percentage`) estructurados para integración. |
+
 ---
 
 ## 5. Requisitos no funcionales
@@ -195,6 +215,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RNF-012 | El sistema debe evitar que una excepción individual cancele el lote de tareas. | Gather/colección de resultados contiene manejo individual de fallos. |
 | RNF-013 | El sistema debe manejar indisponibilidad temporal de Redis con política explícita. | Fallback controlado o error claro; nunca corrupción de respuesta. |
 | RNF-014 | La caché no debe ser requisito para que el pipeline básico pueda procesar un PDF en modo degradado. | Si Redis falla, se puede procesar sin hits/escrituras según configuración. |
+| RNF-015 | El sistema debe ofrecer fallback automático a caché in-memory (`InMemoryLRUCacheService`) si Redis no está disponible o está deshabilitado. | Se conmuta de forma transparente manteniendo el contrato `BaseCacheService` sin interrumpir el servicio. |
 
 ### 5.3 Seguridad y privacidad
 
@@ -240,7 +261,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RV-005 | PDF corrupto o cifrado no soportado | Informar imposibilidad de procesamiento |
 | RV-006 | Más páginas que el máximo | Rechazar o aplicar política configurada |
 | RV-007 | Parámetros vacíos tras normalización | Rechazar y solicitar al menos uno |
-| RV-008 | Redis no disponible | Aplicar modo degradado o respuesta controlada según configuración |
+| RV-008 | Redis no disponible | Conmutar a modo degradado in-memory sin interrumpir ejecución |
 | RV-009 | Todas las keys inválidas o agotadas | Entregar páginas locales y marcar pendientes IA con error parcial |
 | RV-010 | Respuesta IA no cumple schema | Marcar error de página; no persistir L1 inválida |
 | RV-011 | Deadline global expirado | Cancelar solo pendientes seguras; consolidar parcial |
@@ -258,8 +279,9 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RC-005 | Redis es la fuente de caché de producción para L0 y L1. |
 | RC-006 | Batch API no se utiliza para el endpoint interactivo `/procesar`; está orientada a procesamiento asíncrono masivo. [web:31][web:32] |
 | RC-007 | Context Cache se debe usar solo con API y campos verificados en la versión fijada del SDK. [web:16][web:18][web:24] |
-| RC-008 | No se usa un diccionario local como única caché de producción. |
+| RC-008 | No se usa un diccionario local como única caché de producción, pero sí como fallback de resiliencia in-memory. |
 | RC-009 | La concurrencia IA se controla antes de enviar solicitudes para reducir errores de cuota. [web:31] |
+| RC-010 | `opencv-python-headless` y `numpy` constituyen la suite obligatoria para operaciones deterministas de visión (Deskew y Otsu). |
 
 ---
 
@@ -267,9 +289,11 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 
 | Artefacto | Relación |
 |---|---|
-| PRD | Define problema, alcance, usuarios y éxito del producto |
+| PRD | Define problema, alcance, usuarios y éxito del producto Pydective |
 | Requisitos | Define comportamiento verificable del MVP |
 | ADR-001 | Define arquitectura híbrida, caché y failover |
+| ADR-002 | Define preprocesamiento determinista (Otsu, Deskew), catálogo de imágenes, chat documental y streaming SSE |
+| ADR-003 | Define extracción semántica clave-valor, ventanas de contexto (KWIC) y normalización de entidades |
 | Especificación arquitectónica general | Define módulos, flujos y contratos |
 | Estrategia de pruebas | Debe mapear cada caso crítico a RF/RNF/RV |
 | Historias de usuario | Deben referenciar requisitos aplicables |

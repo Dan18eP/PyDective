@@ -1,17 +1,24 @@
 # Documento de Negocio
-## Motor Ultra-Veloz de Extracción Multimodal Anti-Ruido
+## Pydective: Motor Inteligente, Visión Forense y Detective Documental B2B
 
-**Versión:** 1.0 — definición de negocio  
-**Estado:** propuesta de producto  
-**Tipo de solución:** SaaS web B2B para extracción, búsqueda y estructuración de información en PDFs
+**Versión:** 2.0 — definición de negocio y producto  
+**Estado:** propuesta de producto aprobada  
+**Tipo de solución:** SaaS web B2B para extracción asistida, catalogación visual y chat interactivo sobre PDFs
 
 ---
 
 ## 1. Resumen ejecutivo
 
-El **Motor Ultra-Veloz de Extracción Multimodal Anti-Ruido** es una plataforma web orientada a empresas y equipos que necesitan localizar, extraer y organizar información desde documentos PDF con rapidez, incluso cuando contienen escaneos de baja calidad, imágenes, logos, tablas o texto no seleccionable.
+**Pydective** es una plataforma web inteligente de extracción asistida, catalogación visual forense y análisis conversacional de documentos PDF. Permite a empresas y equipos operativos (contabilidad, finanzas, jurídico, auditoría y operaciones) interrogar a sus documentos, extraer campos clave y auditar evidencias gráficas con rapidez absoluta, incluso ante escaneos de baja calidad, inclinados (*skewed*), manchados o con tipografía deteriorada.
 
-El producto combina extracción directa desde PDFs digitales con análisis multimodal de IA para páginas que requieren interpretación visual. Su propuesta de valor no es únicamente “leer PDFs”: es permitir que un usuario cargue un archivo y obtenga, en una sola interacción, texto limpio, coincidencias de parámetros definidos y descripciones útiles de los elementos visuales relevantes.
+El producto combina visión por computadora determinista (corrección de inclinación *Deskew* y binarización *Otsu*), extracción nativa de alta velocidad, catalogación de elementos gráficos (sellos, firmas manuscritas, logos) y un **módulo conversacional ("Pydective Chat")** que permite al usuario formular preguntas complejas en lenguaje natural y obtener respuestas fundamentadas con citas exactas por página.
+
+La ventaja competitiva se concentra en cuatro atributos:
+
+1. **Determinismo antes de IA directa:** Se corrigen las imperfecciones visuales (Deskew + Otsu) con visión por computadora clásica, reduciendo el gasto innecesario de tokens de IA y disparando la precisión.
+2. **Identificación forense de imágenes:** Cada firma, sello oficial y logotipo queda catalogado con su número de página y descripción.
+3. **Interrogatorio conversacional (Pydective):** No solo busca palabras clave; permite conversar con el PDF para deducciones y análisis complejos basados en evidencia.
+4. **Velocidad y economía unitaria:** Triple caché (L0/L1/L2) que permite reconsultas instantáneas (<20 ms) y costos marginales decrecientes.
 
 La ventaja competitiva se concentra en tres atributos:
 
@@ -58,8 +65,9 @@ El producto puede entrar inicialmente como una herramienta de productividad para
 - Encuentra datos importantes en segundos en lugar de leer manualmente páginas completas.
 - Puede trabajar con PDFs digitales y escaneados desde una interfaz sencilla.
 - Define parámetros de búsqueda adaptados a su tarea: nombres, fechas, montos, códigos, cláusulas, números de factura o términos técnicos.
-- Recibe resultados organizados por página y con contexto visual cuando existe.
-- Puede repetir búsquedas sobre el mismo documento con respuesta prácticamente inmediata.
+- Cataloga e inspecciona sellos, firmas y logos con su página correspondiente.
+- **Interroga al PDF mediante un chat interactivo** con citas obligatorias de página para resolver dudas específicas.
+- Puede repetir búsquedas sobre el mismo documento con respuesta prácticamente inmediata (<20 ms en L0, <50 ms en L1).
 
 ### Para la organización
 
@@ -151,17 +159,22 @@ El MVP debe resolver una necesidad completa, no intentar abarcar toda la gestió
 
 ### Alcance del MVP
 
-- Carga de un PDF por operación.
-- Búsqueda por parámetros escritos por el usuario.
-- Extracción de texto nativo cuando esté disponible.
-- Procesamiento inteligente de páginas escaneadas o visuales.
-- Resultado por página con:
-  - texto extraído o limpiado;
-  - parámetros encontrados;
-  - descripción de elementos visuales relevantes;
-  - estado de éxito o advertencia.
-- Visualización web de los hallazgos.
-- Reconsulta rápida del mismo documento.
+- Carga de un PDF por operación (hasta ~20 páginas).
+- Búsqueda por parámetros definidos por el usuario con normalización canónica.
+- **Extracción semántica clave-valor y contexto forense (KWIC):**
+  - Captura del valor asociado (montos, fechas, NITs) más allá del simple conteo de palabras.
+  - Normalización tipificada de monedas, fechas y documentos de identidad.
+  - Ventanas contextuales de cláusulas u oraciones completas.
+  - Expansión semántica de sinónimos comunes (ej. `total`, `importe`, `saldo`).
+  - Vinculación de hallazgos con sellos y firmas cercanas.
+- **Preprocesamiento determinista de imagen:** Corrección de inclinación (*Deskew*) y binarización (*Otsu*) para documentos escaneados.
+- **Inventario y catalogación de imágenes:** Detección y descripción de firmas, sellos, logos y diagramas por página.
+- Extracción de texto nativo sin coste de IA para páginas digitales.
+- Análisis multimodal selectivo (Gemini Flash) restringido únicamente a páginas `needs_ai`.
+- **Módulo Pydective Chat:** Interfaz para conversar con el PDF con grounding estricto y citas por página.
+- Resultado por página con estado, hallazgos, catálogo visual y procedencia (`local`, `ia`, `cache_l1`, `empty`).
+- Streaming reactivo SSE del progreso para mitigar timeouts en el navegador.
+- Resiliencia operativa con fallback automático a memoria local si Redis no está disponible.
 
 ### Promesa de producto MVP
 

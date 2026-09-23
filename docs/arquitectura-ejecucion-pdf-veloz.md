@@ -15,12 +15,13 @@ Orden fijo:
 
 1. Bytes en RAM  
 2. SHA-256  
-3. Caché de aplicación `(hash, keywords)`  
-4. Clasificación local de **todas** las páginas (CPU, sin red)  
-5. Carril IA **solo** para páginas sucias, con semáforo acotado  
-6. Merge estable por número de página  
-7. Escritura de caché **después** del merge (páginas OK)  
-8. HTML  
+3. Caché L0 `(hash, keywords)` y L1 `(hash)`  
+4. Clasificación local con PyMuPDF + Visión Determinista (Deskew Hough + Binarización Otsu con OpenCV)  
+5. Catalogación forense de imágenes (firmas, sellos, logotipos, diagramas) por página  
+6. Carril IA multimodal **solo** para páginas que persistan ilegibles o requieran descripción visual, con semáforo acotado  
+7. Merge estable por número de página  
+8. Escritura de caché L1 y L0 en `jobs.py` (con fallback in-memory ante fallo de Redis)  
+9. HTML / SSE streaming de progreso + Interfaz conversacional (Pydective Chat)  
 
 ---
 
@@ -37,13 +38,18 @@ cache.py         HIT → return (0 PyMuPDF, 0 Gemini)
     │ MISS
     ▼
 pipeline.fase_A  fitz.open en RAM → texto nativo + has_images
-                 (thread pool CPU, páginas en paralelo local)
-    │
-    ├── páginas RESUELTAS     → lista resultados (sin I/O)
-    └── páginas PENDIENTES    → fase_B
-              │
-              ▼
-         WebP en thread pool (una vez por página pendiente)
+                 │
+                 ├── páginas ESCANEADAS/SUCIAS → preprocess_service (Deskew + Otsu)
+                 │                                │
+                 │                                ├── limpias deterministas → RESUELTAS local
+                 │                                └── persisten sucias      → PENDIENTES IA
+                 │
+                 ├── catálogo visual            → image_service (firmas, sellos, logos)
+                 ├── páginas RESUELTAS           → lista resultados (0 I/O red)
+                 └── páginas PENDIENTES          → fase_B
+                           │
+                           ▼
+                      WebP optimizado (150 DPI, q70, una vez por página pendiente)
               │
               ▼
          Gemini async + semáforo = f(keys sanas, RPM)
@@ -67,8 +73,10 @@ Una sola apertura `fitz.open(stream=bytes)`. Para cada página, **solo** operaci
 |---|---|---|
 | Texto nativo largo y keywords presentes, sin imágenes | éxito local | no pixmap |
 | Texto nativo largo, keywords ausentes, sin imágenes | éxito local con lista vacía | no pixmap (no alucinar con IA si el PDF es digital) |
-| Poco texto / texto basura / página imagen | pendiente IA | pixmap |
-| Hay imágenes embebidas **y** el producto pide describirlas | pendiente IA | pixmap |
+| Página inclinada o fondo con sombras/ruido | Preprocesamiento determinista: Deskew + Otsu | Limpieza antes de evaluar |
+| Post-Otsu: texto legible alcanzado | éxito local | no pixmap, 0 costo IA |
+| Poco texto / texto basura persistente / escaneo complejo | pendiente IA | pixmap 150 DPI |
+| Hay sellos, firmas, logos o imágenes a describir | catalogación image_service + pendiente IA | pixmap 150 DPI |
 
 Heurística de “texto basura” (producto, no magia):
 
@@ -184,16 +192,19 @@ Si el timeout pisa el failover, se **devuelve parcial** (páginas OK + errores),
 ## 8. Módulos y contratos (para que no se pisen)
 
 ```
-app_pdf_veloz/
-├── main.py         # I/O HTTP, llama una función
-├── jobs.py         # orquesta: hash → L0/L1 → fase_A → fase_B → write cache
-├── classify.py     # fase A, puro PyMuPDF
-├── render.py       # pixmap → WebP, CPU
-├── gemini_io.py    # generate_content + retry de página
-├── keys.py         # estados healthy/cooldown/exhausted/invalid + semáforo
-├── cache.py        # L0 L1 L2
-├── models.py       # Pydantic AnalisisPagina
-├── templates/
+pydective/
+├── main.py               # Borde HTTP: SSE streaming (/procesar/stream), Chat (/chat), Jinja2
+├── jobs.py               # Orquestador único: hash → L0/L1 → Fase A → Fase B → persistencia
+├── classify.py           # Fase A: extracción nativa con PyMuPDF
+├── preprocess_service.py # Visión determinista: Deskew (Hough) + Binarización Otsu con OpenCV
+├── image_service.py      # Detección y catalogación forense de imágenes (firmas, sellos, logos)
+├── chat_service.py       # Pydective Chat: Grounding sobre L1 + Context Cache L2 con citas
+├── render.py             # Pixmap 150 DPI → WebP q70 en CPU
+├── gemini_io.py          # Llamada a Gemini Flash estructurado + retry y failover por página
+├── keys.py               # Pool con estados healthy/cooldown/exhausted/invalid + semáforo por proyecto
+├── cache.py              # Redis L0/L1/L2 + Fallback transparente InMemoryLRUCache
+├── models.py             # Modelos Pydantic (JobInput, JobOutput, ChatInput, ChatOutput)
+├── templates/            # UI Pydective con panel de hallazgos y chat interactivo
 └── static/
 ```
 

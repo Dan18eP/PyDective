@@ -1,21 +1,21 @@
-# PRD — Motor Ultra-Veloz de Extracción Multimodal Anti-Ruido
+# PRD — Pydective: Motor Inteligente y Detective de Documentos PDF
 
-**Versión:** 1.0  
-**Estado:** definición de producto para MVP  
+**Versión:** 2.0  
+**Estado:** definición de producto actualizada para MVP  
 **Fecha:** 2026-09-23  
-**Producto:** aplicación web B2B de búsqueda y extracción asistida sobre PDFs
+**Producto:** Pydective — aplicación web B2B de extracción asistida, visión determinista y chat interactivo sobre PDFs
 
 ---
 
 ## 1. Resumen
 
-El Motor Ultra-Veloz de Extracción Multimodal Anti-Ruido permite a un usuario cargar un PDF, indicar los datos que necesita encontrar y recibir resultados estructurados por página. El producto funciona tanto con PDFs digitales como con escaneos o documentos mixtos que contienen texto no seleccionable, imágenes, logos, diagramas o baja calidad visual.
+**Pydective** es un motor inteligente de extracción, catalogación visual y análisis conversacional de documentos PDF. Permite a un usuario cargar un PDF, buscar parámetros clave (ej. `factura, fecha, total, NIT`), catalogar elementos gráficos e **interrogar conversacionalmente al documento** como un detective forense documental, recibiendo hallazgos y respuestas estructuradas por página.
 
-La promesa del MVP es:
+El producto funciona tanto con PDFs digitales como con escaneos de baja calidad, documentos inclinados (*skewed*), manchados o mixtos. Aplica un principio estricto de **"Determinismo antes de IA"**: utiliza visión por computadora clásica (binarización Otsu y corrección de inclinación Deskew) antes de acudir a modelos multimodales, reduciendo ruido, costes y latencia.
 
-> Encuentra y verifica información importante en PDFs digitales o escaneados sin revisar manualmente cada página.
+La promesa de Pydective es:
 
-El producto no se posiciona como un lector de PDF genérico ni como una plataforma documental completa. Se posiciona como una herramienta de productividad para extraer y localizar información específica de forma rápida, verificable y reutilizable.
+> Encuentra datos clave, cataloga firmas y sellos, e interroga a tus PDFs digitales o escaneados en segundos, con trazabilidad exacta por página y sin reprocesar trabajo.
 
 ---
 
@@ -121,36 +121,47 @@ Pymes y equipos administrativos que trabajan con facturas, soportes contables, c
 
 ### Flujo principal
 
-1. El usuario abre la página principal.
+1. El usuario abre la página principal de Pydective.
 2. Carga un archivo PDF válido.
-3. Escribe uno o más parámetros separados por coma.
-4. Envía el formulario.
-5. El sistema procesa el documento o reutiliza información ya extraída.
-6. El usuario visualiza resultados ordenados por página.
-7. El usuario puede cargar el mismo PDF y consultar otros parámetros.
+3. Escribe uno o más parámetros separados por coma (ej. `factura, total, fecha`).
+4. Envía el formulario (con soporte de progreso en tiempo real).
+5. El sistema procesa el documento aplicando visión determinista (Deskew + Otsu) y análisis multimodal selectivo para imágenes/escaneos, o reutiliza la caché L0/L1.
+6. El usuario visualiza los resultados ordenados por página, incluyendo el texto extraído, parámetros encontrados y el **catálogo de imágenes identificadas (sellos, firmas, logos)**.
+7. El usuario puede **iniciar una conversación (Chat)** con el documento para formular preguntas contextuales complejas ("¿Quién autorizó el pago?", "¿Tiene sello notarial?"), con respuestas referenciadas por página.
+8. El usuario puede reconsultar otros parámetros sobre el mismo PDF con latencia mínima (<50 ms).
 
 ### Funciones incluidas
 
-- Carga de un PDF por operación.
-- Parámetros de búsqueda libres, separados por coma.
-- Normalización de parámetros: espacios, mayúsculas/minúsculas y duplicados.
-- Detección de coincidencias en texto nativo.
-- Análisis de páginas escaneadas o visuales cuando sea necesario.
-- Extracción de texto limpio por página.
-- Descripción de imágenes, logos u objetos relevantes cuando aplique.
-- Resultados por página con estado de éxito o error.
-- Reutilización de resultados para el mismo documento.
-- Vista HTML renderizada en servidor.
+- Carga de un PDF por operación (hasta ~20 páginas en MVP).
+- Parámetros de búsqueda libres, normalizados canónicamente.
+- **Visión por computadora determinista previa a IA:**
+  - Corrección de inclinación (*Deskew* con transformada de Hough).
+  - Binarización y limpieza de ruido (*Otsu Thresholding*).
+- **Inventario y catalogación de imágenes por página:**
+  - Detección física de objetos visuales en la página.
+  - Tipificación y descripción semántica (firmas, sellos, logotipos, diagramas, fotos).
+- **Extracción semántica clave-valor y contexto forense (KWIC):**
+  - Extracción de la entidad o valor asociado al parámetro (montos, fechas, NITs, porcentajes).
+  - Normalización estructurada de datos (`currency`, `date`, `tax_id`, `percentage`).
+  - Ventana contextual de la oración o cláusula completa que da sentido a la coincidencia.
+  - Expansión semántica y reconocimiento automático de sinónimos canónicos (ej. `total` $\rightarrow$ `importe`, `saldo`).
+  - Vinculación con evidencias visuales adyacentes (firmas y sellos cercanos).
+- Extracción de texto limpio y detección de coincidencias nativas.
+- Análisis multimodal selectivo (Gemini Flash con semáforo global) solo para páginas `needs_ai`.
+- **Módulo Pydective Chat:** Interfaz conversacional conectada a L1/L2 para interrogar al PDF con citas obligatorias de página.
+- Soporte para resultados parciales aislados por página.
+- Modo degradado tolerante a fallos de Redis (memoria local automática).
+- Soporte de streaming de progreso por Server-Sent Events (SSE).
 
 ### Tipos de PDF soportados
 
 | Tipo de documento | Expectativa MVP |
 |---|---|
-| PDF digital con texto | Resolución local rápida |
-| PDF mixto texto + imágenes | Texto local; IA solo si se requiere análisis visual |
-| Escaneo sin capa de texto | Análisis multimodal por página necesaria |
-| Escaneo con ruido moderado | Intento de extracción multimodal y advertencia si la calidad limita el resultado |
-| Página vacía | Resultado vacío sin llamar a IA |
+| PDF digital con texto | Resolución local ultrarrápida (<150 ms) sin coste de IA |
+| PDF digital con imágenes/logos | Texto local; catalogación y descripción de imágenes por página |
+| Escaneo inclinado o manchado | Preprocesamiento determinista (Deskew + Otsu) antes de evaluar IA |
+| Escaneo sin capa de texto | Limpieza determinista + análisis multimodal por página |
+| Página vacía | Detección determinista; resultado vacío sin llamar a IA |
 
 ---
 
@@ -160,32 +171,31 @@ Pymes y equipos administrativos que trabajan con facturas, soportes contables, c
 
 Debe incluir:
 
-- Área de carga de PDF.
-- Indicador claro de tipo y tamaño permitido.
-- Campo de parámetros de búsqueda.
-- Ejemplo visible de uso: `factura, fecha, total, NIT`.
-- Botón de procesamiento.
-- Mensajes de validación antes de enviar.
+- Identidad del producto: **Pydective — Tu Detective Documental con IA**.
+- Área de carga de PDF (drag & drop y explorador de archivos).
+- Indicador claro de tipo (.pdf) y tamaño permitido (hasta 25 MB).
+- Campo de parámetros de búsqueda con chips interactivos de ejemplo: `factura`, `fecha`, `total`, `NIT`, `firma`.
+- Botón de procesamiento con indicador de estado accesible.
 
 ### Estado de procesamiento
 
-En el MVP puede ser una transición simple hacia la pantalla de resultados. Debe comunicar que el documento está siendo analizado y no debe inducir al usuario a reenviar el formulario mientras está en curso.
+Soporta progreso visual en tiempo real vía SSE (o feedback de carga accesible `aria-live="polite"`), mostrando qué páginas se han completado y qué fase se está ejecutando (Clasificación local, Deskew/Otsu, Inferencia visual).
 
-### Pantalla de resultados
+### Pantalla de resultados y Panel de Detective
 
 Debe mostrar:
 
-- Hash o identificador técnico no sensible del procesamiento, si es útil para soporte.
-- Parámetros buscados.
-- Resumen: páginas analizadas, páginas resueltas localmente, páginas analizadas con IA, páginas con advertencia.
-- Lista ordenada de páginas.
-- Por cada página:
-  - número de página;
-  - estado: encontrada, sin coincidencias, procesada, advertencia/error;
-  - texto extraído o fragmento útil;
-  - parámetros encontrados;
-  - descripciones visuales cuando existan;
-  - origen informativo: local, IA o caché.
+- **Cabecera de Trazabilidad:** Hash SHA-256 no sensible, parámetros buscados y badges de rendimiento (páginas locales, IA, tiempo total, hit de caché).
+- **Catálogo Global de Elementos Visuales:** Resumen de imágenes, sellos y firmas detectados a lo largo del PDF con acceso directo a sus páginas.
+- **Lista Ordenada de Páginas:**
+  - Número de página y badge de procedencia (`local`, `ia`, `cache_l1`, `empty`, `advertencia`).
+  - Texto limpio extraído.
+  - Parámetros encontrados resaltados.
+  - **Tarjetas de imágenes detectadas:** Tipo de imagen (sello, firma, logo), descripción contextual y ubicación.
+- **Panel Pydective Chat (Conversar con el Documento):**
+  - Entrada de texto para formular preguntas abiertas sobre el documento.
+  - Historial de conversación con respuestas fundamentadas que citan explícitamente `[Página X]`.
+  - Enlaces directos a las páginas citadas para verificación inmediata.
 
 ### Resultados parciales
 

@@ -277,8 +277,11 @@
                                     {% for img in p.metadatos_visuales %}
                                     <button type="button" class="visual-tag visual-tag-interactive" 
                                             onclick="window.highlightSourceInPdf({{ p.numero_pagina }}, {{ img.bbox }}, '{{ img.clasificacion_semantica or 'objeto' }}')"
-                                            title="Enfocar en visor: {{ img.clasificacion_semantica or 'objeto' }} (Pág {{ p.numero_pagina }})">
+                                            title="Enfocar en visor: {{ img.clasificacion_semantica or 'objeto' }} (Pág {{ p.numero_pagina }}){% if img.contenido_decodificado %} - Contenido: {{ img.contenido_decodificado }}{% endif %}">
                                         {{ img.clasificacion_semantica or 'objeto' }}
+                                        {% if img.contenido_decodificado %}
+                                        <span class="qr-code-indicator" title="{{ img.contenido_decodificado }}">🔗</span>
+                                        {% endif %}
                                     </button>
                                     {% endfor %}
                                 </div>

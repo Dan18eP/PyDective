@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import pymupdf
 from app.domain.models import MetadatoImagen
 
@@ -85,15 +85,51 @@ def inventory_physical_images(
     return items
 
 
+def detect_qr_with_opencv(page: pymupdf.Page, bbox: List[float]) -> Tuple[bool, Optional[str]]:
+    """
+    Detecta y decodifica códigos QR mediante visión por computador (OpenCV QRCodeDetector).
+    Retorna (True, decoded_info) si se detecta un patrón de código QR válido.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        rect = pymupdf.Rect(bbox)
+        if rect.width < 25.0 or rect.height < 25.0:
+            return False, None
+
+        # Renderizar recorte con resolución moderada
+        pix = page.get_pixmap(clip=rect, dpi=120)
+        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+        if pix.n == 4:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_BGRA2BGR)
+        elif pix.n == 1:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+
+        detector = cv2.QRCodeDetector()
+        decoded_info, points, _ = detector.detectAndDecode(img_arr)
+        if points is not None or (decoded_info and len(decoded_info.strip()) > 0):
+            val = decoded_info.strip() if decoded_info else None
+            return True, val
+    except Exception:
+        pass
+    return False, None
+
+
 def classify_image_semantics(
     image_meta: MetadatoImagen,
     page_text: str = "",
     nearby_text: str = "",
+    is_qr_detected: bool = False,
 ) -> str:
     """
-    Clasificación semántica de alta precisión basada en proximidad contextual y geometría (US-13).
+    Clasificación semántica de alta precisión basada en proximidad contextual, geometría y visión OpenCV (US-13).
     Tipologías válidas: 'firma_manuscrita', 'sello_oficial', 'codigo_barras', 'codigo_qr', 'fotografia', 'logotipo', 'diagrama'.
     """
+    # Si la visión por computador OpenCV ya validó el patrón del código QR
+    if is_qr_detected:
+        return "codigo_qr"
+
     bbox = image_meta.bbox
     w = max(1.0, bbox[2] - bbox[0])
     h = max(1.0, bbox[3] - bbox[1])
@@ -116,7 +152,7 @@ def classify_image_semantics(
     has_qr_text = any(
         kw in full_text for kw in ("qr", "cufe", "dian", "verificacion", "verificación", "código qr", "codigo qr", "factura electrónica", "factura electronica")
     )
-    if (0.80 <= aspect_ratio <= 1.25) and (50.0 <= w <= 240.0 and 50.0 <= h <= 240.0) and has_qr_text:
+    if (0.70 <= aspect_ratio <= 1.40) and (35.0 <= w <= 650.0 and 35.0 <= h <= 650.0) and has_qr_text:
         return "codigo_qr"
 
     # 3. Sello oficial notarial o de certificación
@@ -192,10 +228,80 @@ def catalog_page_images(
             min(page_rect.height, img.bbox[3] + 40.0),
         )
         nearby_text = page.get_text("text", clip=clip).strip()
+
+        # Detección y decodificación de código QR mediante visión por computador (OpenCV)
+        is_qr = False
+        w = max(1.0, img.bbox[2] - img.bbox[0])
+        h = max(1.0, img.bbox[3] - img.bbox[1])
+        aspect_ratio = w / h
+        if 0.70 <= aspect_ratio <= 1.40 and (w >= 30.0 and h >= 30.0):
+            is_qr, decoded = detect_qr_with_opencv(page, img.bbox)
+            if is_qr and decoded:
+                img.contenido_decodificado = decoded
+
         img.clasificacion_semantica = classify_image_semantics(
             img,
             page_text=full_text,
             nearby_text=nearby_text,
+            is_qr_detected=is_qr,
         )
+
+    # Si ningún elemento fue catalogado como QR, evaluar salvaguarda de escaneo completo
+    has_qr = any(i.clasificacion_semantica == "codigo_qr" for i in images)
+    if not has_qr:
+        page_has_qr_hint = any(kw in full_text.lower() for kw in ("qr", "cufe", "dian", "verificacion", "código qr", "codigo qr"))
+        if not full_text.strip() or page_has_qr_hint:
+            try:
+                import cv2
+                import numpy as np
+
+                pix = page.get_pixmap(dpi=120)
+                img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+                if pix.n == 4:
+                    img_arr = cv2.cvtColor(img_arr, cv2.COLOR_BGRA2BGR)
+                elif pix.n == 1:
+                    img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+
+                detector = cv2.QRCodeDetector()
+                decoded_info, points, _ = detector.detectAndDecode(img_arr)
+                if points is not None or (decoded_info and len(decoded_info.strip()) > 0):
+                    scale = 72.0 / 120.0
+                    pts = points.reshape(-1, 2)
+                    qr_bbox = [
+                        round(float(pts[:, 0].min() * scale), 2),
+                        round(float(pts[:, 1].min() * scale), 2),
+                        round(float(pts[:, 0].max() * scale), 2),
+                        round(float(pts[:, 1].max() * scale), 2),
+                    ]
+                    page_area = max(1.0, page_rect.width * page_rect.height)
+                    qr_area_ratio = max(0.001, (qr_bbox[2] - qr_bbox[0]) * (qr_bbox[3] - qr_bbox[1]) / page_area)
+
+                    # Si ya existe una imagen que contiene o solapa este QR, actualizarla
+                    matched_img = None
+                    for img in images:
+                        if (img.bbox[0] <= qr_bbox[0] + 10 and img.bbox[1] <= qr_bbox[1] + 10 and
+                            img.bbox[2] >= qr_bbox[2] - 10 and img.bbox[3] >= qr_bbox[3] - 10):
+                            matched_img = img
+                            break
+
+                    if matched_img:
+                        matched_img.clasificacion_semantica = "codigo_qr"
+                        if decoded_info and len(decoded_info.strip()) > 0:
+                            matched_img.contenido_decodificado = decoded_info.strip()
+                    else:
+                        page_num = page.number + 1
+                        images.append(
+                            MetadatoImagen(
+                                id_imagen=f"qr_p{page_num}_{len(images)+1:02d}",
+                                pagina=page_num,
+                                tipo_fisico="raster",
+                                bbox=qr_bbox,
+                                area_ratio=round(qr_area_ratio, 4),
+                                clasificacion_semantica="codigo_qr",
+                                contenido_decodificado=decoded_info.strip() if decoded_info and len(decoded_info.strip()) > 0 else None,
+                            )
+                        )
+            except Exception:
+                pass
 
     return images

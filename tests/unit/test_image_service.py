@@ -82,3 +82,37 @@ def test_us13_catalog_page_images_with_classification():
     assert any(label in ("firma_manuscrita", "sello_oficial", "logotipo", "diagrama") for label in labels)
 
     doc.close()
+
+
+def test_qr_code_opencv_detection_and_decoding():
+    from app.services.image_service import detect_qr_with_opencv
+
+    pdf_path = FIXTURES_DIR / "qr_sample.pdf"
+    doc = pymupdf.open(str(pdf_path))
+    page = doc[0]
+
+    images = inventory_physical_images(page)
+    assert len(images) >= 1
+
+    qr_img = images[0]
+    is_qr, decoded = detect_qr_with_opencv(page, qr_img.bbox)
+    assert is_qr is True
+    assert decoded == "https://www.qrcode-monkey.com"
+
+    doc.close()
+
+
+def test_catalog_page_images_classifies_and_decodes_qr():
+    pdf_path = FIXTURES_DIR / "qr_sample.pdf"
+    doc = pymupdf.open(str(pdf_path))
+    page = doc[0]
+
+    cataloged = catalog_page_images(page, catalogar_imagenes=True)
+    assert len(cataloged) >= 1
+
+    qr_item = next((img for img in cataloged if img.clasificacion_semantica == "codigo_qr"), None)
+    assert qr_item is not None
+    assert qr_item.clasificacion_semantica == "codigo_qr"
+    assert qr_item.contenido_decodificado == "https://www.qrcode-monkey.com"
+
+    doc.close()

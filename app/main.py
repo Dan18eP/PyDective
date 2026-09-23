@@ -830,7 +830,7 @@ async def resultados_view(request: Request, pdf_hash: str):
     return templates.TemplateResponse(
         request=request,
         name="resultados.html",
-        context={"resultado": resultado},
+        context={"resultado": resultado, "settings": settings},
     )
 
 

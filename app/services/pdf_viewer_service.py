@@ -2,7 +2,7 @@ import os
 import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-import fitz  # PyMuPDF
+import pymupdf
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -73,7 +73,7 @@ def search_exact_pdf_occurrences(pdf_hash: str, query: str) -> Dict[str, Any]:
             "coincidencias": [],
         }
 
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     all_matches: List[Dict[str, Any]] = []
 
     try:
@@ -90,7 +90,7 @@ def search_exact_pdf_occurrences(pdf_hash: str, query: str) -> Dict[str, Any]:
                 bbox = [round(float(r.x0), 2), round(float(r.y0), 2), round(float(r.x1), 2), round(float(r.y1), 2)]
 
                 # Extraer línea circundante como contexto
-                clip_rect = fitz.Rect(0, max(0.0, float(r.y0) - 8.0), width, min(height, float(r.y1) + 8.0))
+                clip_rect = pymupdf.Rect(0, max(0.0, float(r.y0) - 8.0), width, min(height, float(r.y1) + 8.0))
                 line_snippet = page.get_text("text", clip=clip_rect).strip().replace("\n", " ")
 
                 all_matches.append({

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,10 +20,14 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Model & AI
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
     GEMINI_API_KEYS: str = Field(
         default="",
         description="Comma-separated list of Google Gemini API keys"
+    )
+    GEMINI_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Single Google Gemini API key"
     )
 
     # Concurrency
@@ -52,9 +56,12 @@ class Settings(BaseSettings):
 
     @property
     def api_keys_list(self) -> List[str]:
-        if not self.GEMINI_API_KEYS:
-            return []
-        return [k.strip() for k in self.GEMINI_API_KEYS.split(",") if k.strip()]
+        keys = []
+        if self.GEMINI_API_KEYS:
+            keys.extend([k.strip() for k in self.GEMINI_API_KEYS.split(",") if k.strip()])
+        if self.GEMINI_API_KEY and self.GEMINI_API_KEY.strip() not in keys:
+            keys.append(self.GEMINI_API_KEY.strip())
+        return keys
 
 
 settings = Settings()

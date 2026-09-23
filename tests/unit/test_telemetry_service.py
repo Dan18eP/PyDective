@@ -51,7 +51,7 @@ def test_health_check_endpoint_contract():
     assert data["app"] == "PyDective"
     assert data["version"] == "2.2.0"
     assert data["environment"] == settings.ENVIRONMENT
-    assert data["model"] == "gemini-2.0-flash"
+    assert data["model"] == settings.GEMINI_MODEL
     assert data["max_pages"] == 20
     assert data["opencv_bypass_threshold"] == settings.OPENCV_BYPASS_WORD_THRESHOLD
 

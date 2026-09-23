@@ -145,3 +145,74 @@ def test_epic4_streaming_reports_gemini_and_visuals():
     complete_event = json.loads(lines[-1].replace("data:", "").strip())
     assert complete_event["tipo"] == "completado"
     assert complete_event["status"] == EstadoCobertura.COMPLETE.value
+
+
+def test_epic4_needs_ai_page_processed_concurrently_before_result():
+    # Verifica que páginas que requieren IA se envían y procesan concurrentemente
+    # antes de retornar la respuesta definitiva al usuario
+    pdf_path = FIXTURES_DIR / "digital_contrato.pdf"
+    assert pdf_path.exists()
+
+    call_order = []
+
+    def mock_concurrent_ai(image_bytes, page_number, parameters, **kwargs):
+        call_order.append(page_number)
+        from app.domain.models import HallazgoEnriquecido, Evidence, MetodoExtraccion
+        ev = Evidence(
+            evidence_id=f"ev_p{page_number}_ai_001",
+            page=page_number,
+            text=f"AI_EXTRACTION_P{page_number}: TestValue",
+            bbox=[50.0, 50.0, 150.0, 70.0],
+            source=MetodoExtraccion.VISUAL_AI,
+            evidence_score=0.95,
+        )
+        return GeminiInvocationResult(
+            numero_pagina=page_number,
+            exito=True,
+            error=None,
+            hallazgos=[
+                HallazgoEnriquecido(
+                    parametro="dictamen pericial",
+                    valor="Firma y Dictamen Válido IA",
+                    confianza=0.95,
+                    metodo=MetodoExtraccion.VISUAL_AI,
+                    evidencias=[ev],
+                    valor_normalizado="FIRMA Y DICTAMEN VALIDO IA",
+                    formato_detectado="TEXT",
+                )
+            ],
+            duracion_ms=25.0,
+        )
+
+    with patch("app.main.classify_page") as mock_classify, \
+         patch("app.main.invoke_gemini_multimodal_page", side_effect=mock_concurrent_ai):
+
+        from app.services.classifier_service import PageClassification
+
+        def side_effect_classify(page, bypass_threshold=80):
+            return PageClassification(
+                numero_pagina=page.number + 1,
+                tipo=TipoPagina.NEEDS_AI,
+                readability_score=0.45,
+                word_count=20,
+                bypass_opencv=False,
+            )
+
+        mock_classify.side_effect = side_effect_classify
+
+        with open(pdf_path, "rb") as f:
+            files = {"file": ("contrato.pdf", f, "application/pdf")}
+            data = {"parametros": "dictamen pericial"}
+            response = client.post("/procesar", files=files, data=data)
+
+    assert response.status_code == 200
+    res = response.json()
+    assert res["status"] == EstadoCobertura.COMPLETE.value
+    # Confirm that all pages requiring AI were called and completed before result returned
+    assert len(call_order) == res["paginas_totales"]
+    # Confirm AI finding is incorporated in final hallazgos
+    h_map = {h["parametro"]: h for h in res["hallazgos"]}
+    assert "dictamen pericial" in h_map
+    assert h_map["dictamen pericial"]["valor"] == "Firma y Dictamen Válido IA"
+    assert h_map["dictamen pericial"]["metodo"] == MetodoExtraccion.VISUAL_AI.value
+

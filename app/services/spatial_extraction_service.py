@@ -57,6 +57,12 @@ def normalize_currency_amount(text: str) -> Tuple[Optional[str], Optional[str]]:
     if re.search(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b", text) or re.search(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", text):
         return None, None
 
+    # Ignorar si el número va acompañado de unidades no monetarias (ej. 120TB, 50km, 20m2, 12 meses, 48 horas)
+    if re.search(r"\d+\s*(tb|gb|mb|kb|km|m2|kg|horas|dias|días|meses|anos|años|paginas|páginas|folios|unidades|uds)\b", text, re.IGNORECASE):
+        return None, None
+
+    has_explicit_currency = any(c in upper for c in ("$", "COP", "USD", "EUR", "€", "PESOS", "DOLARES", "DÓLARES"))
+
     # Extraer el bloque numérico más significativo
     # Permite dígitos, puntos y comas
     match = re.search(r"(\d[\d\.,\s]*\d|\d+)", text)
@@ -288,6 +294,9 @@ def extract_spatial_key_values(
             for i, w in enumerate(raw_words):
                 w_norm = normalize_parameter(w[4]).strip(":-_.,")
                 if w_norm == syn_tokens[0] or (len(syn_tokens[0]) > 4 and syn_tokens[0] in w_norm):
+                    # Evitar falsos positivos en oraciones continuas precedidas por preposiciones o artículos
+                    if i > 0 and raw_words[i - 1][4].lower() in ("a", "la", "el", "en", "por", "de", "del", "con", "una", "un") and not w[4].endswith(":"):
+                        continue
                     matched = True
                     last_idx = i
                     if len(syn_tokens) > 1:
@@ -325,18 +334,46 @@ def extract_spatial_key_values(
                 if right_words:
                     right_words.sort(key=lambda item: item[0])
                     val_text = " ".join([w[4] for w in right_words]).strip()
-                    if val_text.startswith(":"):
-                        val_text = val_text[1:].strip()
-                    if ":" in val_text:
-                        after_colon = val_text.split(":", 1)[1].strip()
-                        if after_colon:
-                            val_text = after_colon
-                    if "·" in val_text:
-                        first_chunk = val_text.split("·")[0].strip()
-                        if normalize_tax_id(first_chunk) or normalize_currency_amount(first_chunk)[0] or normalize_date_string(first_chunk):
-                            val_text = first_chunk
 
-                    # Descartar unidades de encabezado de tabla como (COP)
+                    # Si el valor contiene o termina con dos puntos, descartar el prefijo de etiqueta
+                    if ":" in val_text:
+                        parts = val_text.split(":", 1)
+                        val_text = parts[1].strip()
+                    elif val_text.endswith(":"):
+                        val_text = ""
+
+                    if val_text:
+                        if val_text.startswith(":"):
+                            val_text = val_text[1:].strip()
+                        if "·" in val_text:
+                            val_text = val_text.split("·")[0].strip()
+                        if "|" in val_text:
+                            val_text = val_text.split("|")[0].strip()
+
+                        # Delimitación ante conectores gramaticales/jurídicos comunes
+                        cut_match = re.split(r",\s*(?:representad[oa]|con\s+domicilio|identificad[oa]|en\s+adelante|de\s+fecha)\b", val_text, flags=re.IGNORECASE)
+                        if len(cut_match) > 1:
+                            val_text = cut_match[0].strip()
+
+                        # Si es persona o entidad, remover prefijos gramaticales conectores
+                        if any(k in param for k in ("representante", "arrendador", "contratante", "perito", "contratista")):
+                            val_text = re.sub(r"^(?:por|de|el|la)\s+", "", val_text, flags=re.IGNORECASE).strip()
+                            if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", val_text, re.IGNORECASE):
+                                val_text = ""
+
+                        # Si buscamos NIT, delimitar estrictamente al patrón numérico
+                        if any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion")):
+                            nit_m = re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)
+                            if nit_m:
+                                val_text = nit_m.group(0)
+
+                        # Si buscamos moneda/total, extraer quirúrgicamente la cifra monetaria si está mezclada
+                        if any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto")):
+                            curr_m = re.search(r"(\$\s*[\d\.,]+(?:\s*COP|\s*USD|\s*EUR)?|USD\s*[\d\.,]+|EUR\s*[\d\.,]+)", val_text)
+                            if curr_m:
+                                val_text = curr_m.group(0).strip()
+
+                    # Descartar unidades de encabezado de tabla como (COP) o si quedó vacío
                     if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
                         found_right = True
                         v_x0 = right_words[0][0]
@@ -349,7 +386,6 @@ def extract_spatial_key_values(
 
                         dist = math.sqrt((v_x0 - k_x1) ** 2 + ((v_y0 - k_y0) ** 2))
                         penalizacion_dist = min(0.30, dist / 300.0)
-                        # Bonificación por vector horizontal explícito (más específico que columna de tabla)
                         base_h = 1.0 - penalizacion_dist + 0.08
                         if raw_words[last_w_idx][4].endswith(":"):
                             base_h += 0.05
@@ -358,6 +394,18 @@ def extract_spatial_key_values(
                         norm_curr, curr_code = normalize_currency_amount(val_text)
                         norm_date = normalize_date_string(val_text)
                         norm_tax = normalize_tax_id(val_text)
+
+                        # Validación semántica estricta del tipo de parámetro
+                        is_currency_param = any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto", "saldo"))
+                        is_date_param = any(k in param for k in ("fecha", "date", "emision", "vencimiento"))
+                        is_tax_param = any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion"))
+
+                        if is_currency_param and not norm_curr:
+                            continue
+                        if is_date_param and not norm_date:
+                            continue
+                        if is_tax_param and not (norm_tax or re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)):
+                            continue
 
                         if norm_date:
                             val_norm = norm_date
@@ -412,7 +460,7 @@ def extract_spatial_key_values(
                     down_words = []
                     for w in raw_words:
                         dy = w[1] - k_y1
-                        if 0.0 < dy <= 35.0:
+                        if 0.0 < dy <= 50.0:
                             # Ignorar otras etiquetas o dos puntos aislados
                             if w[4].endswith(":") or w[4].upper() in ("IVA", "TOTAL", "SUBTOTAL", "NIT", "FECHA"):
                                 continue
@@ -421,22 +469,45 @@ def extract_spatial_key_values(
                             k_width = k_x1 - k_x0
                             if min(w_width, k_width) > 0:
                                 overlap_ratio = overlap_x / min(w_width, k_width)
-                                if overlap_ratio >= 0.40 or (w[0] >= k_x0 - 15 and w[2] <= k_x1 + 60):
+                                if overlap_ratio >= 0.35 or (w[0] >= k_x0 - 25 and w[2] <= k_x1 + 100):
                                     down_words.append(w)
 
                     if down_words:
                         down_words.sort(key=lambda item: item[0])
                         val_text = " ".join([w[4] for w in down_words]).strip()
-                        if val_text.startswith(":"):
-                            val_text = val_text[1:].strip()
                         if ":" in val_text:
-                            after_colon = val_text.split(":", 1)[1].strip()
-                            if after_colon:
-                                val_text = after_colon
-                        if "·" in val_text:
-                            first_chunk = val_text.split("·")[0].strip()
-                            if normalize_tax_id(first_chunk) or normalize_currency_amount(first_chunk)[0] or normalize_date_string(first_chunk):
-                                val_text = first_chunk
+                            parts = val_text.split(":", 1)
+                            val_text = parts[1].strip()
+                        elif val_text.endswith(":"):
+                            val_text = ""
+
+                        if val_text:
+                            if val_text.startswith(":"):
+                                val_text = val_text[1:].strip()
+                            if "·" in val_text:
+                                val_text = val_text.split("·")[0].strip()
+                            if "|" in val_text:
+                                val_text = val_text.split("|")[0].strip()
+
+                            cut_match = re.split(r",\s*(?:representad[oa]|con\s+domicilio|identificad[oa]|en\s+adelante|de\s+fecha)\b", val_text, flags=re.IGNORECASE)
+                            if len(cut_match) > 1:
+                                val_text = cut_match[0].strip()
+
+                            if any(k in param for k in ("representante", "arrendador", "contratante", "perito", "contratista")):
+                                val_text = re.sub(r"^(?:por|de|el|la)\s+", "", val_text, flags=re.IGNORECASE).strip()
+                                if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", val_text, re.IGNORECASE):
+                                    val_text = ""
+
+                            if any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion")):
+                                nit_m = re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)
+                                if nit_m:
+                                    val_text = nit_m.group(0)
+
+                            if any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto")):
+                                curr_m = re.search(r"(\$\s*[\d\.,]+(?:\s*COP|\s*USD|\s*EUR)?|USD\s*[\d\.,]+|EUR\s*[\d\.,]+)", val_text)
+                                if curr_m:
+                                    val_text = curr_m.group(0).strip()
+
                         if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
                             v_x0 = down_words[0][0]
                             v_y0 = min(w[1] for w in down_words)
@@ -453,6 +524,18 @@ def extract_spatial_key_values(
                             norm_curr, curr_code = normalize_currency_amount(val_text)
                             norm_date = normalize_date_string(val_text)
                             norm_tax = normalize_tax_id(val_text)
+
+                            # Validación semántica estricta del tipo de parámetro
+                            is_currency_param = any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto", "saldo"))
+                            is_date_param = any(k in param for k in ("fecha", "date", "emision", "vencimiento"))
+                            is_tax_param = any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion"))
+
+                            if is_currency_param and not norm_curr:
+                                continue
+                            if is_date_param and not norm_date:
+                                continue
+                            if is_tax_param and not (norm_tax or re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)):
+                                continue
 
                             if norm_date:
                                 val_norm = norm_date
@@ -516,37 +599,86 @@ def extract_spatial_key_values(
     return hallazgos
 
 
+def _eval_finding_quality(f: Optional[HallazgoEnriquecido]) -> float:
+    if f is None:
+        return -999.0
+    raw = (f.valor or "").strip()
+    raw_l = raw.lower()
+    if not raw or raw_l in ("no especificado", "no detectado", "n/a", "no encontrado", "none", "null", "-", "--", "no aplica"):
+        return -10.0
+    if raw.endswith(":") or ":" in raw or raw_l in ("del contrato:", "a pagar:", "total:"):
+        return -5.0
+    if any(k in f.parametro for k in ("representante", "arrendador", "contratante", "perito", "contratista")):
+        if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", raw, re.IGNORECASE):
+            return -5.0
+
+    score = f.confianza
+    if f.valor_normalizado and f.formato_detectado in ("COP", "USD", "EUR", "ISO-8601", "NIT"):
+        score += 0.30
+
+    if f.evidencias:
+        min_p = min(e.page for e in f.evidencias)
+        if min_p == 1:
+            score += 0.25
+        elif min_p <= 3:
+            score += 0.10
+
+    return score
+
+
 def consolidate_findings(
     native_findings: List[HallazgoEnriquecido],
     ai_findings: List[HallazgoEnriquecido],
 ) -> List[HallazgoEnriquecido]:
     """
-    Resuelve conflictos de extracción entre texto espacial determinista y visión IA (US-10 Escenario 2).
-    
-    Regla de precedencia absoluta:
-    - Si el hallazgo proviene de texto vectorial nativo con alta certeza (confianza >= 0.70),
-      prevalece de forma estricta e inmutable el dato determinista de PyMuPDF.
-    - La respuesta de IA solo se adopta si no hay dato determinista o si la confianza nativa es deficiente.
+    Consolida hallazgos entre extracción espacial nativa y visión IA (US-10).
+    Previene datos irreales descartando valores nativos que sean etiquetas no resueltas.
+    Si la IA extrajo un valor válido y estructurado, prevalece la IA ante datos nativos ambiguos.
+    Aplica precedencia absoluta del dato determinista nativo cuando es confiable (confianza >= 0.70).
     """
-    native_map = {f.parametro: f for f in native_findings}
+    all_params = sorted(list(set([f.parametro for f in native_findings] + [f.parametro for f in ai_findings])))
+    native_map: dict[str, HallazgoEnriquecido] = {}
+    for f in native_findings:
+        p = f.parametro
+        if p not in native_map or _eval_finding_quality(f) > _eval_finding_quality(native_map[p]):
+            native_map[p] = f
+
+    ai_map: dict[str, HallazgoEnriquecido] = {}
+    for f in ai_findings:
+        p = f.parametro
+        if p not in ai_map or _eval_finding_quality(f) > _eval_finding_quality(ai_map[p]):
+            ai_map[p] = f
+
     consolidated: List[HallazgoEnriquecido] = []
 
-    # Incluir todos los hallazgos nativos deterministas
-    for f in native_findings:
-        consolidated.append(f)
+    for p in all_params:
+        nat = native_map.get(p)
+        ai = ai_map.get(p)
 
-    # Evaluar hallazgos de IA
-    for ai_f in ai_findings:
-        if ai_f.parametro in native_map:
-            existing = native_map[ai_f.parametro]
-            # Si el nativo tiene buena confianza, se descarta la IA
-            if existing.confianza >= 0.70:
-                continue
-            else:
-                # Reemplazar por IA si el nativo es débil
-                consolidated = [f for f in consolidated if f.parametro != ai_f.parametro]
-                consolidated.append(ai_f)
+        nat_score = _eval_finding_quality(nat)
+        ai_score = _eval_finding_quality(ai)
+
+        if nat_score < 0.0 and ai_score < 0.0:
+            continue
+        elif nat_score >= 0.0 and ai_score < 0.0:
+            assert nat is not None
+            consolidated.append(nat)
+        elif ai_score >= 0.0 and nat_score < 0.0:
+            assert ai is not None
+            consolidated.append(ai)
         else:
-            consolidated.append(ai_f)
+            assert nat is not None and ai is not None
+            # Ambos son válidos
+            if nat.valor_normalizado and nat.valor_normalizado == ai.valor_normalizado:
+                # Acuerdo pleno nativo-IA: máxima certeza
+                nat.confianza = 1.0
+                consolidated.append(nat)
+            elif nat.confianza >= 0.70 and nat.valor_normalizado and not nat.valor.endswith(":"):
+                # Precedencia estricta del dato determinista nativo válido (US-10 Escenario 2)
+                consolidated.append(nat)
+            elif ai_score > nat_score + 0.10:
+                consolidated.append(ai)
+            else:
+                consolidated.append(nat)
 
     return consolidated

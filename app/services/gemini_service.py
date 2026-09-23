@@ -113,7 +113,8 @@ def invoke_gemini_multimodal_page(
         prompt = (
             f"Extrae con precisión quirúrgica los siguientes parámetros del documento: {', '.join(parameters)}.\n"
             "Devuelve los hallazgos en formato JSON estructurado con parametro, valor, confianza (0.0 a 1.0) "
-            "y bbox [x0, y0, x1, y1] si es detectable."
+            "y bbox [x0, y0, x1, y1] si es detectable. Si un parámetro no está presente o no aplica en esta página, "
+            "NO lo incluyas en la lista de hallazgos."
         )
 
         image_part = types.Part.from_bytes(
@@ -147,7 +148,11 @@ def invoke_gemini_multimodal_page(
 
         for idx, item in enumerate(items):
             param = item.get("parametro", "").lower().strip()
-            raw_val = item.get("valor", "").strip()
+            raw_val = str(item.get("valor", "")).strip()
+            if not param or not raw_val or raw_val.lower() in (
+                "no especificado", "no detectado", "no encontrado", "n/a", "na", "null", "none", "no aplica", "-", "--"
+            ):
+                continue
             conf = float(item.get("confianza", 0.85))
             bbox = item.get("bbox", [50.0, 50.0, 200.0, 80.0])
             kwic = item.get("kwic_snippet", raw_val)

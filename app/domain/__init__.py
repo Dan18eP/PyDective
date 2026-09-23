@@ -21,6 +21,8 @@ from app.domain.models import (
 from app.domain.errors import (
     PydectiveError,
     DocumentoInvalidoError,
+    TamanoArchivoExcedidoError,
+    DocumentoCorruptoOEncriptadoError,
     ExcesoPaginasError,
     ParametrosVaciosError,
     DocumentoNoEncontradoOExpiradoError,
@@ -47,6 +49,8 @@ __all__ = [
     "ChatOutput",
     "PydectiveError",
     "DocumentoInvalidoError",
+    "TamanoArchivoExcedidoError",
+    "DocumentoCorruptoOEncriptadoError",
     "ExcesoPaginasError",
     "ParametrosVaciosError",
     "DocumentoNoEncontradoOExpiradoError",

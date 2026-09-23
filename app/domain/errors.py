@@ -7,8 +7,24 @@ class PydectiveError(Exception):
 
 
 class DocumentoInvalidoError(PydectiveError):
-    def __init__(self, message: str = "El archivo provisto no es un PDF válido o está corrupto."):
+    def __init__(self, message: str = "El archivo provisto no es un PDF válido o no cuenta con la cabecera %PDF."):
         super().__init__(message, code="INVALID_PDF")
+
+
+class TamanoArchivoExcedidoError(PydectiveError):
+    def __init__(self, max_bytes: int, received_bytes: int):
+        max_mb = max_bytes / (1024 * 1024)
+        super().__init__(
+            f"El archivo excede el tamaño máximo permitido de {max_mb:.0f} MB (recibidos: {received_bytes} bytes).",
+            code="FILE_SIZE_EXCEEDED"
+        )
+        self.max_bytes = max_bytes
+        self.received_bytes = received_bytes
+
+
+class DocumentoCorruptoOEncriptadoError(PydectiveError):
+    def __init__(self, message: str = "El documento PDF está corrupto o protegido con contraseña."):
+        super().__init__(message, code="CORRUPTED_OR_ENCRYPTED_PDF")
 
 
 class ExcesoPaginasError(PydectiveError):

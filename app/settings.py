@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # Engine Limits & Thresholds
     MAX_PAGES_PER_DOCUMENT: int = 20
+    MAX_FILE_SIZE_BYTES: int = 25 * 1024 * 1024  # 25 MB
     GLOBAL_DEADLINE_SECONDS: float = 25.0
     OPENCV_BYPASS_WORD_THRESHOLD: int = 80
     CATALOGAR_IMAGENES_DEFAULT: bool = True

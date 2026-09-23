@@ -24,9 +24,16 @@ from app.domain.models import (
 from app.domain.errors import (
     PydectiveError,
     DocumentoInvalidoError,
+    TamanoArchivoExcedidoError,
+    DocumentoCorruptoOEncriptadoError,
     ExcesoPaginasError,
     ParametrosVaciosError,
     DocumentoNoEncontradoOExpiradoError,
+)
+from app.services.ingestion_service import validate_and_read_pdf
+from app.services.semantic_extraction_service import (
+    canonicalize_parameters,
+    expand_parameter_synonyms,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,9 +71,18 @@ async def pydective_error_handler(request: Request, exc: PydectiveError):
     status_code = status.HTTP_400_BAD_REQUEST
     if isinstance(exc, DocumentoNoEncontradoOExpiradoError):
         status_code = status.HTTP_404_NOT_FOUND
+
+    payload = {"error": exc.code, "message": exc.message}
+    if hasattr(exc, "max_pages") and hasattr(exc, "total_pages"):
+        payload["max_pages"] = exc.max_pages
+        payload["received_pages"] = exc.total_pages
+    if hasattr(exc, "max_bytes") and hasattr(exc, "received_bytes"):
+        payload["max_bytes"] = exc.max_bytes
+        payload["received_bytes"] = exc.received_bytes
+
     return JSONResponse(
         status_code=status_code,
-        content={"error": exc.code, "message": exc.message},
+        content=payload,
     )
 
 
@@ -97,31 +113,19 @@ async def health_check():
 @app.post("/procesar", response_model=JobOutput)
 async def procesar_documento(
     file: UploadFile = File(...),
-    parametros: str = Form(...),
+    parametros: str = Form(""),
     catalogar_imagenes: bool = Form(True),
 ):
     """
     Endpoint sincrónico para análisis forense de un documento PDF.
     """
-    if not file.filename.lower().endswith(".pdf"):
-        raise DocumentoInvalidoError("Solo se permiten archivos en formato PDF.")
+    # 1. Normalización canónica de parámetros (US-02, US-03, ADR-003)
+    canonical_params, query_hash = canonicalize_parameters(parametros)
 
-    try:
-        params_list = json.loads(parametros)
-        if not isinstance(params_list, list) or not params_list:
-            raise ParametrosVaciosError()
-    except (json.JSONDecodeError, TypeError):
-        params_list = [p.strip() for p in parametros.split(",") if p.strip()]
-        if not params_list:
-            raise ParametrosVaciosError()
-
+    # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
-    if len(pdf_bytes) == 0:
-        raise DocumentoInvalidoError("El archivo provisto está vacío.")
-
-    # In initial scaffold, compute mock hash and return valid initial JobOutput
-    import hashlib
-    pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    doc.close()
 
     # Create mock result for initial scaffold demonstration
     output = JobOutput(
@@ -130,8 +134,8 @@ async def procesar_documento(
         status=EstadoCobertura.COMPLETE,
         nivel_cache=NivelCache.L0,
         duracion_total_ms=45.2,
-        paginas_totales=1,
-        paginas_completadas=1,
+        paginas_totales=total_pages,
+        paginas_completadas=total_pages,
         paginas_pendientes=[],
         resultados_por_pagina=[
             ResultadoPagina(
@@ -170,7 +174,7 @@ async def procesar_documento(
                 ],
                 valor_normalizado=f"{p.upper()}_NORM",
             )
-            for i, p in enumerate(params_list)
+            for i, p in enumerate(canonical_params)
         ],
         telemetria=TelemetriaDesagregada(
             hash_ms=1.2,
@@ -189,41 +193,29 @@ async def procesar_documento(
 @app.post("/procesar/stream")
 async def procesar_documento_stream(
     file: UploadFile = File(...),
-    parametros: str = Form(...),
+    parametros: str = Form(""),
     catalogar_imagenes: bool = Form(True),
 ):
     """
     Endpoint SSE (Server-Sent Events) para transmitir progreso en tiempo real.
     """
-    if not file.filename.lower().endswith(".pdf"):
-        raise DocumentoInvalidoError("Solo se permiten archivos en formato PDF.")
+    # 1. Normalización canónica de parámetros (US-02, US-03, ADR-003)
+    canonical_params, query_hash = canonicalize_parameters(parametros)
 
-    try:
-        params_list = json.loads(parametros)
-        if not isinstance(params_list, list) or not params_list:
-            raise ParametrosVaciosError()
-    except (json.JSONDecodeError, TypeError):
-        params_list = [p.strip() for p in parametros.split(",") if p.strip()]
-        if not params_list:
-            raise ParametrosVaciosError()
-
+    # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
-    if len(pdf_bytes) == 0:
-        raise DocumentoInvalidoError("El archivo provisto está vacío.")
-
-    import hashlib
-    pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    doc.close()
 
     async def event_generator():
-        total_pages = 3  # Demo scaffold stream
         yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': total_pages})}\n\n"
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.05)
 
         for p in range(1, total_pages + 1):
             carril = "local" if p != 2 else "needs_ai"
             duracion = 14.5 if carril == "local" else 180.2
             yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p, 'carril': carril, 'duracion_ms': duracion, 'paginas_completadas': p, 'total_paginas': total_pages})}\n\n"
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.05)
 
         # Build output and store in memory
         output = JobOutput(
@@ -295,7 +287,7 @@ async def procesar_documento_stream(
                     ],
                     valor_normalizado=f"{param.upper()}_NORM",
                 )
-                for idx, param in enumerate(params_list)
+                for idx, param in enumerate(canonical_params)
             ],
             telemetria=TelemetriaDesagregada(
                 hash_ms=1.5,

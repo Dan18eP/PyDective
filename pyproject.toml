@@ -19,3 +19,7 @@ dependencies = [
     "redis>=8.1.0",
     "uvicorn[standard]>=0.53.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

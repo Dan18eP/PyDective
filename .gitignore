@@ -57,3 +57,8 @@ tmp/
 node_modules/
 npm-debug.log*
 
+# Job results cache
+data/results/*.json
+!data/results/.gitkeep
+
+

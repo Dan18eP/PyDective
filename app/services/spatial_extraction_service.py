@@ -286,15 +286,15 @@ def extract_spatial_key_values(
             candidate_key_boxes = []
 
             for i, w in enumerate(raw_words):
-                w_norm = normalize_parameter(w[4])
-                if syn_tokens[0] in w_norm:
+                w_norm = normalize_parameter(w[4]).strip(":-_.,")
+                if w_norm == syn_tokens[0] or (len(syn_tokens[0]) > 4 and syn_tokens[0] in w_norm):
                     matched = True
                     last_idx = i
                     if len(syn_tokens) > 1:
                         for k in range(1, len(syn_tokens)):
                             if i + k < len(raw_words):
-                                next_w_norm = normalize_parameter(raw_words[i + k][4])
-                                if syn_tokens[k] not in next_w_norm:
+                                next_w_norm = normalize_parameter(raw_words[i + k][4]).strip(":-_.,")
+                                if next_w_norm != syn_tokens[k] and (len(syn_tokens[k]) <= 4 or syn_tokens[k] not in next_w_norm):
                                     matched = False
                                     break
                                 last_idx = i + k
@@ -327,6 +327,14 @@ def extract_spatial_key_values(
                     val_text = " ".join([w[4] for w in right_words]).strip()
                     if val_text.startswith(":"):
                         val_text = val_text[1:].strip()
+                    if ":" in val_text:
+                        after_colon = val_text.split(":", 1)[1].strip()
+                        if after_colon:
+                            val_text = after_colon
+                    if "·" in val_text:
+                        first_chunk = val_text.split("·")[0].strip()
+                        if normalize_tax_id(first_chunk) or normalize_currency_amount(first_chunk)[0] or normalize_date_string(first_chunk):
+                            val_text = first_chunk
 
                     # Descartar unidades de encabezado de tabla como (COP)
                     if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
@@ -419,6 +427,16 @@ def extract_spatial_key_values(
                     if down_words:
                         down_words.sort(key=lambda item: item[0])
                         val_text = " ".join([w[4] for w in down_words]).strip()
+                        if val_text.startswith(":"):
+                            val_text = val_text[1:].strip()
+                        if ":" in val_text:
+                            after_colon = val_text.split(":", 1)[1].strip()
+                            if after_colon:
+                                val_text = after_colon
+                        if "·" in val_text:
+                            first_chunk = val_text.split("·")[0].strip()
+                            if normalize_tax_id(first_chunk) or normalize_currency_amount(first_chunk)[0] or normalize_date_string(first_chunk):
+                                val_text = first_chunk
                         if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
                             v_x0 = down_words[0][0]
                             v_y0 = min(w[1] for w in down_words)

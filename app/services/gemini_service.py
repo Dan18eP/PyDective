@@ -1,3 +1,4 @@
+import re
 from typing import List, Optional, Dict, Any, Tuple
 import json
 import logging
@@ -13,10 +14,12 @@ except ImportError:
 
 from app.domain.models import HallazgoEnriquecido, Evidence, MetadatoImagen
 from app.domain.enums import MetodoExtraccion, TipoPagina
+from app.services.semantic_extraction_service import expand_parameter_synonyms
 from app.services.spatial_extraction_service import (
     normalize_currency_amount,
     normalize_date_string,
     normalize_tax_id,
+    extract_kwic_context,
 )
 from app.settings import settings
 
@@ -211,51 +214,23 @@ def _simulate_page_extraction(
     hint_text: str = "",
 ) -> List[HallazgoEnriquecido]:
     """
-    Extracción determinista para entorno local/offline o tests.
+    Extracción para entorno local/offline o tests.
+    Cuando hint_text contiene texto real del documento, extrae de manera quirúrgica los valores
+    reales buscando las líneas y estructuras textuales correspondientes a cada parámetro.
+    Solo si hint_text está completamente vacío (ej. tests sintéticos unitarios con bytes dummy),
+    retorna estructuras de muestra para validar contratos de datos.
     """
     results: List[HallazgoEnriquecido] = []
-    text_lower = hint_text.lower()
+    hint_cleaned = hint_text.strip()
 
-    for idx, p in enumerate(parameters):
-        p_clean = p.lower().strip()
-        val = None
-        norm_val = None
-        fmt = "TEXT"
-        tipo = "texto"
-        divisa = None
-
-        if "total" in p_clean:
-            val = "$ 9.579.500 COP"
-            norm_val = "9579500.00"
-            fmt = "COP"
-            tipo = "moneda"
-            divisa = "COP"
-        elif "subtotal" in p_clean:
-            val = "$ 8.050.000 COP"
-            norm_val = "8050000.00"
-            fmt = "COP"
-            tipo = "moneda"
-            divisa = "COP"
-        elif "fecha" in p_clean:
-            val = "15/04/2026"
-            norm_val = "2026-04-15"
-            fmt = "ISO-8601"
-            tipo = "fecha"
-        elif any(k in p_clean for k in ("nit", "rut", "identificacion")):
-            val = "900543210-8"
-            norm_val = "900543210-8"
-            fmt = "NIT"
-            tipo = "nit"
-        elif "vigencia" in p_clean or "plazo" in p_clean:
-            val = "12 meses"
-            norm_val = "12 meses"
-            fmt = "TEXT"
-            tipo = "texto"
-        elif hint_text:
-            val = f"Detectado en texto de pág {page_number}"
-            norm_val = val
-
-        if val:
+    if not hint_cleaned:
+        # Fallback exclusivo para tests unitarios sintéticos que inyectan dummy bytes sin texto OCR
+        for idx, p in enumerate(parameters):
+            p_clean = p.lower().strip()
+            val = "$ 9.579.500 COP" if "total" in p_clean else ("15/04/2026" if "fecha" in p_clean else ("900543210-8" if any(k in p_clean for k in ("nit", "rut", "identificacion")) else "12 meses"))
+            norm_val = "9579500.00" if "total" in p_clean else ("2026-04-15" if "fecha" in p_clean else ("900543210-8" if any(k in p_clean for k in ("nit", "rut", "identificacion")) else "12 meses"))
+            fmt = "COP" if "total" in p_clean else ("ISO-8601" if "fecha" in p_clean else ("NIT" if any(k in p_clean for k in ("nit", "rut", "identificacion")) else "TEXT"))
+            tipo = "moneda" if "total" in p_clean else ("fecha" if "fecha" in p_clean else ("nit" if any(k in p_clean for k in ("nit", "rut", "identificacion")) else "texto"))
             ev = Evidence(
                 evidence_id=f"ev_p{page_number}_ai_{idx+1:03d}",
                 page=page_number,
@@ -275,9 +250,92 @@ def _simulate_page_extraction(
                     valor_normalizado=norm_val,
                     formato_detectado=fmt,
                     tipo_entidad=tipo,
-                    divisa=divisa,
+                    divisa="COP" if fmt == "COP" else None,
                     kwic_context=f"{p_clean.upper()}: {val}",
                 )
             )
+        return results
+
+    # Extracción REAL a partir de hint_text
+    lines = [l.strip() for l in hint_text.splitlines() if l.strip()]
+
+    for idx, p in enumerate(parameters):
+        p_clean = p.lower().strip()
+        synonyms = expand_parameter_synonyms(p_clean)
+        found = False
+
+        for i, line in enumerate(lines):
+            for syn in synonyms:
+                pattern = r"\b" + re.escape(syn) + r"\b"
+                if re.search(pattern, line, re.IGNORECASE):
+                    val_cand = ""
+                    if ":" in line:
+                        val_cand = line.split(":", 1)[1].strip()
+                    if not val_cand and i + 1 < len(lines):
+                        val_cand = lines[i + 1].strip()
+
+                    if val_cand.startswith(":"):
+                        val_cand = val_cand[1:].strip()
+                    if ":" in val_cand:
+                        after_c = val_cand.split(":", 1)[1].strip()
+                        if after_c:
+                            val_cand = after_c
+                    if "·" in val_cand:
+                        chunk0 = val_cand.split("·")[0].strip()
+                        if normalize_tax_id(chunk0) or normalize_currency_amount(chunk0)[0] or normalize_date_string(chunk0):
+                            val_cand = chunk0
+
+                    if val_cand:
+                        norm_curr, curr = normalize_currency_amount(val_cand)
+                        norm_date = normalize_date_string(val_cand)
+                        norm_tax = normalize_tax_id(val_cand)
+
+                        fmt = "TEXT"
+                        tipo = "texto"
+                        norm_val = val_cand
+                        divisa = None
+
+                        if norm_date:
+                            fmt = "ISO-8601"
+                            tipo = "fecha"
+                            norm_val = norm_date
+                        elif norm_tax and any(k in p_clean for k in ("nit", "rut", "cedula", "id", "identificacion")):
+                            fmt = "NIT"
+                            tipo = "nit"
+                            norm_val = norm_tax
+                        elif norm_curr:
+                            fmt = curr
+                            tipo = "moneda"
+                            norm_val = norm_curr
+                            divisa = curr
+
+                        kwic = extract_kwic_context(hint_text, val_cand)
+                        ev = Evidence(
+                            evidence_id=f"ev_p{page_number}_ai_{idx+1:03d}",
+                            page=page_number,
+                            text=f"{p_clean.upper()}: {val_cand}",
+                            bbox=[72.0, 150.0 + idx * 30.0, 300.0, 170.0 + idx * 30.0],
+                            source=MetodoExtraccion.VISUAL_AI,
+                            evidence_score=0.92,
+                            kwic_snippet=kwic,
+                        )
+                        results.append(
+                            HallazgoEnriquecido(
+                                parametro=p_clean,
+                                valor=val_cand,
+                                confianza=0.92,
+                                metodo=MetodoExtraccion.VISUAL_AI,
+                                evidencias=[ev],
+                                valor_normalizado=norm_val,
+                                formato_detectado=fmt,
+                                tipo_entidad=tipo,
+                                divisa=divisa,
+                                kwic_context=kwic,
+                            )
+                        )
+                        found = True
+                        break
+            if found:
+                break
 
     return results

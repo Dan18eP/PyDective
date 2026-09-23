@@ -121,6 +121,16 @@ def process_chat_query(
     fallback_job = fallback_store.get(pdf_hash) if fallback_store else None
 
     if l1_entry is None and fallback_job is None:
+        from pathlib import Path
+        disk_path = Path(__file__).resolve().parent.parent.parent / "data" / "results" / f"{pdf_hash}.json"
+        if disk_path.exists():
+            from app.domain.models import JobOutput
+            try:
+                fallback_job = JobOutput.model_validate_json(disk_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+    if l1_entry is None and fallback_job is None:
         raise DocumentoNoEncontradoOExpiradoError(pdf_hash)
 
     q_norm = normalize_parameter(pregunta)
@@ -180,6 +190,15 @@ def process_chat_query(
                     if ev not in matched_evidences:
                         matched_evidences.append(ev)
                         matched_findings.append(f"{h.parametro}: {h.valor}")
+
+    # Búsqueda adicional en evidencias directas de todas las páginas
+    for res in resultados_paginas:
+        for ev in getattr(res, "evidencias", []):
+            ev_norm = normalize_parameter(ev.text)
+            if any(t in ev_norm for t in q_tokens):
+                if ev not in matched_evidences:
+                    matched_evidences.append(ev)
+                    matched_findings.append(ev.text)
 
     # 4. Si hay API key de Gemini configurada, sintetizar respuesta natural enriquecida
     active_key = settings.api_keys_list[0] if settings.api_keys_list else None

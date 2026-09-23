@@ -18,6 +18,10 @@ class Evidence(BaseModel):
         le=1.0,
         description="Score determinista de calidad y proximidad"
     )
+    kwic_snippet: Optional[str] = Field(
+        default=None,
+        description="Ventana forense de contexto (KWIC) de la oración"
+    )
 
 
 class HallazgoEnriquecido(BaseModel):
@@ -28,6 +32,9 @@ class HallazgoEnriquecido(BaseModel):
     evidencias: List[Evidence] = Field(default_factory=list)
     valor_normalizado: Optional[str] = None
     formato_detectado: Optional[str] = None
+    tipo_entidad: Optional[str] = None
+    divisa: Optional[str] = None
+    kwic_context: Optional[str] = None
 
 
 class MetadatoImagen(BaseModel):

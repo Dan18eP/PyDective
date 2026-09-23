@@ -38,6 +38,10 @@ from app.services.semantic_extraction_service import (
 )
 from app.services.classifier_service import classify_page
 from app.services.preprocess_service import preprocess_page
+from app.services.spatial_extraction_service import (
+    extract_spatial_key_values,
+    consolidate_findings,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -130,8 +134,10 @@ async def procesar_documento(
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
 
     resultados_por_pagina = []
+    all_spatial_findings = []
     total_class_ms = 0.0
     total_prep_ms = 0.0
+    total_retrieval_ms = 0.0
 
     try:
         for p_idx in range(total_pages):
@@ -154,6 +160,16 @@ async def procesar_documento(
                 prep_ms = prep_res.duracion_ms
                 total_prep_ms += prep_ms
 
+            # Extracción espacial determinista en carril LOCAL (US-07, US-08)
+            page_evidences = []
+            if classification.tipo == TipoPagina.LOCAL:
+                t_r = time.perf_counter()
+                page_findings = extract_spatial_key_values(page, canonical_params)
+                total_retrieval_ms += (time.perf_counter() - t_r) * 1000
+                all_spatial_findings.extend(page_findings)
+                for h in page_findings:
+                    page_evidences.extend(h.evidencias)
+
             page_dur = round(class_ms + prep_ms, 2)
             resultados_por_pagina.append(
                 ResultadoPagina(
@@ -163,22 +179,36 @@ async def procesar_documento(
                     duracion_ms=page_dur,
                     preprocesado=preprocesado,
                     metadatos_visuales=classification.metadatos_visuales if catalogar_imagenes else [],
-                    evidencias=[
-                        Evidence(
-                            evidence_id=f"ev_p{p_num}_001",
-                            page=p_num,
-                            text=f"Página clasificada como {classification.tipo.value.upper()}.",
-                            bbox=[50.0, 100.0, 500.0, 120.0],
-                            source=MetodoExtraccion.NATIVE_TEXT if classification.tipo == TipoPagina.LOCAL else MetodoExtraccion.VISUAL_AI,
-                            evidence_score=classification.readability_score,
-                        )
-                    ],
+                    evidencias=page_evidences,
                 )
             )
     finally:
         doc.close()
 
-    total_dur_ms = round(total_class_ms + total_prep_ms + 10.0, 2)
+    # Consolidar hallazgos deduplicando y seleccionando la mayor confianza (US-10)
+    findings_by_param = {}
+    for h in all_spatial_findings:
+        if h.parametro not in findings_by_param or h.confianza > findings_by_param[h.parametro].confianza:
+            findings_by_param[h.parametro] = h
+
+    final_hallazgos = []
+    for p in canonical_params:
+        if p in findings_by_param:
+            final_hallazgos.append(findings_by_param[p])
+        else:
+            final_hallazgos.append(
+                HallazgoEnriquecido(
+                    parametro=p,
+                    valor="No detectado en páginas digitales",
+                    confianza=0.0,
+                    metodo=MetodoExtraccion.SPATIAL_VECTOR,
+                    evidencias=[],
+                    valor_normalizado=None,
+                    formato_detectado="TEXT",
+                )
+            )
+
+    total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + 10.0, 2)
     output = JobOutput(
         pdf_hash=pdf_hash,
         pipeline_version="2.2",
@@ -189,32 +219,14 @@ async def procesar_documento(
         paginas_completadas=total_pages,
         paginas_pendientes=[],
         resultados_por_pagina=resultados_por_pagina,
-        hallazgos=[
-            HallazgoEnriquecido(
-                parametro=p,
-                valor=f"Valor detectado para {p}",
-                confianza=0.95,
-                metodo=MetodoExtraccion.SPATIAL_VECTOR,
-                evidencias=[
-                    Evidence(
-                        evidence_id=f"ev_p1_{i+1:03d}",
-                        page=1,
-                        text=f"{p.upper()}: Valor detectado",
-                        bbox=[100.0, 150.0 + (i * 30.0), 350.0, 170.0 + (i * 30.0)],
-                        source=MetodoExtraccion.SPATIAL_VECTOR,
-                        evidence_score=0.95,
-                    )
-                ],
-                valor_normalizado=f"{p.upper()}_NORM",
-            )
-            for i, p in enumerate(canonical_params)
-        ],
+        hallazgos=final_hallazgos,
         telemetria=TelemetriaDesagregada(
             hash_ms=1.2,
             cache_ms=0.8,
             fitz_ms=round(total_class_ms, 2),
             classification_ms=round(total_class_ms, 2),
             preprocess_ms=round(total_prep_ms, 2),
+            retrieval_ms=round(total_retrieval_ms, 2),
             render_ms=round(total_prep_ms * 0.4, 2),
             gemini_ms=0.0,
             serialization_ms=2.0,
@@ -250,6 +262,8 @@ async def procesar_documento_stream(
             resultados_por_pagina = []
             total_class_ms = 0.0
             total_prep_ms = 0.0
+            total_retrieval_ms = 0.0
+            all_spatial_findings = []
 
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
@@ -271,8 +285,18 @@ async def procesar_documento_stream(
                     prep_ms = prep_res.duracion_ms
                     total_prep_ms += prep_ms
 
+                # Extracción espacial determinista en carril LOCAL (US-07, US-08)
+                page_evidences = []
+                if classification.tipo == TipoPagina.LOCAL:
+                    t_r = time.perf_counter()
+                    page_findings = extract_spatial_key_values(page, canonical_params)
+                    total_retrieval_ms += (time.perf_counter() - t_r) * 1000
+                    all_spatial_findings.extend(page_findings)
+                    for h in page_findings:
+                        page_evidences.extend(h.evidencias)
+
                 page_dur = round(class_ms + prep_ms, 2)
-                yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p_num, 'carril': classification.tipo.value, 'duracion_ms': page_dur, 'paginas_completadas': p_num, 'total_paginas': total_pages})}\n\n"
+                yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p_num, 'carril': classification.tipo.value, 'duracion_ms': page_dur, 'paginas_completadas': p_num, 'total_paginas': total_pages, 'evidencias': [e.model_dump() for e in page_evidences]})}\n\n"
                 await asyncio.sleep(0.02)
 
                 resultados_por_pagina.append(
@@ -283,20 +307,34 @@ async def procesar_documento_stream(
                         duracion_ms=page_dur,
                         preprocesado=preprocesado,
                         metadatos_visuales=classification.metadatos_visuales if catalogar_imagenes else [],
-                        evidencias=[
-                            Evidence(
-                                evidence_id=f"ev_p{p_num}_001",
-                                page=p_num,
-                                text=f"Página clasificada como {classification.tipo.value.upper()}.",
-                                bbox=[50.0, 100.0, 500.0, 120.0],
-                                source=MetodoExtraccion.NATIVE_TEXT if classification.tipo == TipoPagina.LOCAL else MetodoExtraccion.VISUAL_AI,
-                                evidence_score=classification.readability_score,
-                            )
-                        ],
+                        evidencias=page_evidences,
                     )
                 )
 
-            total_dur_ms = round(total_class_ms + total_prep_ms + 10.0, 2)
+            # Consolidar hallazgos de todas las páginas (US-10)
+            findings_by_param = {}
+            for h in all_spatial_findings:
+                if h.parametro not in findings_by_param or h.confianza > findings_by_param[h.parametro].confianza:
+                    findings_by_param[h.parametro] = h
+
+            final_hallazgos = []
+            for p in canonical_params:
+                if p in findings_by_param:
+                    final_hallazgos.append(findings_by_param[p])
+                else:
+                    final_hallazgos.append(
+                        HallazgoEnriquecido(
+                            parametro=p,
+                            valor="No detectado en páginas digitales",
+                            confianza=0.0,
+                            metodo=MetodoExtraccion.SPATIAL_VECTOR,
+                            evidencias=[],
+                            valor_normalizado=None,
+                            formato_detectado="TEXT",
+                        )
+                    )
+
+            total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + 10.0, 2)
             # Build output and store in memory
             output = JobOutput(
                 pdf_hash=pdf_hash,
@@ -308,32 +346,14 @@ async def procesar_documento_stream(
                 paginas_completadas=total_pages,
                 paginas_pendientes=[],
                 resultados_por_pagina=resultados_por_pagina,
-                hallazgos=[
-                    HallazgoEnriquecido(
-                        parametro=param,
-                        valor=f"Valor para {param}",
-                        confianza=0.94,
-                        metodo=MetodoExtraccion.SPATIAL_VECTOR,
-                        evidencias=[
-                            Evidence(
-                                evidence_id=f"ev_p1_{idx+1:03d}",
-                                page=1,
-                                text=f"{param.upper()}: Detectado en cabecera",
-                                bbox=[100.0, 120.0 + (idx * 25.0), 300.0, 140.0 + (idx * 25.0)],
-                                source=MetodoExtraccion.SPATIAL_VECTOR,
-                                evidence_score=0.94,
-                            )
-                        ],
-                        valor_normalizado=f"{param.upper()}_NORM",
-                    )
-                    for idx, param in enumerate(canonical_params)
-                ],
+                hallazgos=final_hallazgos,
                 telemetria=TelemetriaDesagregada(
                     hash_ms=1.5,
                     cache_ms=1.0,
                     fitz_ms=round(total_class_ms, 2),
                     classification_ms=round(total_class_ms, 2),
                     preprocess_ms=round(total_prep_ms, 2),
+                    retrieval_ms=round(total_retrieval_ms, 2),
                     render_ms=round(total_prep_ms * 0.4, 2),
                     gemini_ms=0.0,
                     serialization_ms=3.0,
@@ -342,7 +362,7 @@ async def procesar_documento_stream(
             )
             MOCK_RESULTS_STORE[pdf_hash] = output
 
-            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms})}\n\n"
+            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'hallazgos': [h.model_dump() for h in final_hallazgos]})}\n\n"
         finally:
             doc.close()
 

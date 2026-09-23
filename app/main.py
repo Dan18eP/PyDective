@@ -66,6 +66,7 @@ from app.services.cache_service import (
 )
 from app.services.singleflight_service import singleflight_group
 from app.services.key_pool_service import key_pool
+from app.services.chat_service import process_chat_query
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -656,34 +657,11 @@ async def resultados_view(request: Request, pdf_hash: str):
 async def chat_documental(pdf_hash: str, payload: ChatInput):
     """
     Endpoint para Pydective Chat interactivo sobre el documento.
-    Consulta el índice L1 y responde con citas comprobables.
+    Consulta el índice L1 y responde con citas comprobables (US-23).
     """
-    # Verify hash existence per ADR-002 and Specification
-    if pdf_hash not in MOCK_RESULTS_STORE and len(pdf_hash) != 64:
-        raise DocumentoNoEncontradoOExpiradoError(pdf_hash)
-
-    pregunta_lower = payload.pregunta.lower()
-    citas = ["[Página 1]"]
-    
-    if "total" in pregunta_lower or "valor" in pregunta_lower:
-        respuesta = "De acuerdo con la evidencia registrada en la página 1, el valor total estipulado en el documento es de $4.850.000 COP."
-    elif "representante" in pregunta_lower or "arrendador" in pregunta_lower:
-        respuesta = "El documento identifica formalmente a María Consuelo Gómez como representante legal, ubicado en la página 2."
-        citas = ["[Página 2]"]
-    else:
-        respuesta = f"He verificado el índice documental L1 para el documento ({pdf_hash[:8]}). Respecto a tu consulta sobre '{payload.pregunta}', el registro confirma la validez de los términos estipulados en el cuerpo del texto."
-
-    return ChatOutput(
-        respuesta=respuesta,
-        citas=citas,
-        evidencias_relacionadas=[
-            Evidence(
-                evidence_id="ev_p1_001",
-                page=1,
-                text="Evidencia validada en el índice asociativo L1.",
-                bbox=[100.0, 200.0, 400.0, 220.0],
-                source=MetodoExtraccion.NATIVE_TEXT,
-                evidence_score=0.95,
-            )
-        ],
+    return process_chat_query(
+        pdf_hash=pdf_hash,
+        pregunta=payload.pregunta,
+        historial=payload.historial,
+        fallback_store=MOCK_RESULTS_STORE,
     )

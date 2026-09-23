@@ -127,8 +127,20 @@ def invoke_gemini_multimodal_page(
             config=config,
         )
 
-        raw_json = response.text or "{}"
-        parsed = json.loads(raw_json)
+        raw_json = (response.text or "{}").strip()
+        if raw_json.startswith("```"):
+            raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
+            raw_json = re.sub(r"\s*```$", "", raw_json).strip()
+
+        try:
+            parsed = json.loads(raw_json)
+        except json.JSONDecodeError:
+            # Fallback en caso de string parcial o truncamiento
+            match = re.search(r"\{.*\}", raw_json, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0))
+            else:
+                parsed = {"hallazgos": [], "elementos_visuales": []}
 
         items = parsed.get("hallazgos", [])
         hallazgos_enriquecidos: List[HallazgoEnriquecido] = []

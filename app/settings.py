@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Model & AI
-    GEMINI_MODEL: str = "gemini-3.6-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     GEMINI_API_KEYS: str = Field(
         default="",
         description="Comma-separated list of Google Gemini API keys"

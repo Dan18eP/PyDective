@@ -55,6 +55,17 @@ from app.services.image_service import (
 from app.services.gemini_service import (
     invoke_gemini_multimodal_page,
 )
+from app.services.cache_service import (
+    get_l0_cache,
+    set_l0_cache,
+    get_l1_cache,
+    set_l1_cache,
+    resolve_from_l1,
+    L1DocumentEntry,
+    evaluate_and_create_l2_cache,
+)
+from app.services.singleflight_service import singleflight_group
+from app.services.key_pool_service import key_pool
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -146,151 +157,189 @@ async def procesar_documento(
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
 
-    resultados_por_pagina = []
-    all_spatial_findings = []
-    all_ai_findings = []
-    failed_pages = []
-    total_class_ms = 0.0
-    total_prep_ms = 0.0
-    total_retrieval_ms = 0.0
-    total_render_ms = 0.0
-    total_gemini_ms = 0.0
+    # 3. Consulta temprana de Caché L0 instantánea (US-14)
+    cached_l0 = get_l0_cache(pdf_hash, query_hash)
+    if cached_l0 is not None:
+        MOCK_RESULTS_STORE[pdf_hash] = cached_l0
+        return cached_l0
 
-    try:
-        for p_idx in range(total_pages):
-            p_num = p_idx + 1
-            page = doc[p_idx]
+    # 4. Reutilización de conocimiento en Caché L1 documental (US-15)
+    cached_l1 = get_l1_cache(pdf_hash)
+    if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
+        resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
+        if resolved_l1 is not None:
+            MOCK_RESULTS_STORE[pdf_hash] = resolved_l1
+            return resolved_l1
 
-            t0 = time.perf_counter()
-            classification = classify_page(
-                page,
-                bypass_threshold=settings.OPENCV_BYPASS_WORD_THRESHOLD,
-            )
-            class_ms = (time.perf_counter() - t0) * 1000
-            total_class_ms += class_ms
+    flight_key = f"{pdf_hash}:{query_hash}"
 
-            preprocesado = False
-            prep_ms = 0.0
-            if classification.tipo == TipoPagina.NEEDS_AI and not classification.bypass_opencv:
-                prep_res = preprocess_page(page, max_dim=1024, quality=75)
-                preprocesado = prep_res.preprocesado
-                prep_ms = prep_res.duracion_ms
-                total_prep_ms += prep_ms
+    async def _do_extraction():
+        resultados_por_pagina = []
+        all_spatial_findings = []
+        all_ai_findings = []
+        failed_pages = []
+        total_class_ms = 0.0
+        total_prep_ms = 0.0
+        total_retrieval_ms = 0.0
+        total_render_ms = 0.0
+        total_gemini_ms = 0.0
 
-            # Catalogación física y forense de imágenes (US-13)
-            page_visuals = []
-            if catalogar_imagenes:
-                page_visuals = catalog_page_images(page, catalogar_imagenes=True)
+        try:
+            for p_idx in range(total_pages):
+                p_num = p_idx + 1
+                page = doc[p_idx]
 
-            page_evidences = []
-            page_exito = True
-            page_error = None
-
-            # Extracción espacial determinista en carril LOCAL (US-07, US-08)
-            if classification.tipo == TipoPagina.LOCAL:
-                t_r = time.perf_counter()
-                page_findings = extract_spatial_key_values(page, canonical_params)
-                total_retrieval_ms += (time.perf_counter() - t_r) * 1000
-                all_spatial_findings.extend(page_findings)
-                for h in page_findings:
-                    page_evidences.extend(h.evidencias)
-
-            # Inferencia multimodal con Gemini 2.0 Flash en carril NEEDS_AI (US-11, US-12)
-            elif classification.tipo == TipoPagina.NEEDS_AI:
-                # Render baseline WebP a 1024px con PyMuPDF en C (US-11)
-                t_ren = time.perf_counter()
-                webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
-                total_render_ms += (time.perf_counter() - t_ren) * 1000
-
-                # Invocación multimodal con Gemini 2.0 Flash (US-12)
-                t_gem = time.perf_counter()
-                gemini_res = invoke_gemini_multimodal_page(
-                    image_bytes=webp_bytes,
-                    page_number=p_num,
-                    parameters=canonical_params,
-                    page_text_hint=page.get_text(),
+                t0 = time.perf_counter()
+                classification = classify_page(
+                    page,
+                    bypass_threshold=settings.OPENCV_BYPASS_WORD_THRESHOLD,
                 )
-                total_gemini_ms += (time.perf_counter() - t_gem) * 1000
+                class_ms = (time.perf_counter() - t0) * 1000
+                total_class_ms += class_ms
 
-                if not gemini_res.exito:
-                    page_exito = False
-                    page_error = gemini_res.error
-                    failed_pages.append(p_num)
-                else:
-                    all_ai_findings.extend(gemini_res.hallazgos)
-                    for h in gemini_res.hallazgos:
+                preprocesado = False
+                prep_ms = 0.0
+                if classification.tipo == TipoPagina.NEEDS_AI and not classification.bypass_opencv:
+                    prep_res = preprocess_page(page, max_dim=1024, quality=75)
+                    preprocesado = prep_res.preprocesado
+                    prep_ms = prep_res.duracion_ms
+                    total_prep_ms += prep_ms
+
+                # Catalogación física y forense de imágenes (US-13)
+                page_visuals = []
+                if catalogar_imagenes:
+                    page_visuals = catalog_page_images(page, catalogar_imagenes=True)
+
+                page_evidences = []
+                page_exito = True
+                page_error = None
+
+                # Extracción espacial determinista en carril LOCAL (US-07, US-08)
+                if classification.tipo == TipoPagina.LOCAL:
+                    t_r = time.perf_counter()
+                    page_findings = extract_spatial_key_values(page, canonical_params)
+                    total_retrieval_ms += (time.perf_counter() - t_r) * 1000
+                    all_spatial_findings.extend(page_findings)
+                    for h in page_findings:
                         page_evidences.extend(h.evidencias)
 
-            page_dur = round(class_ms + prep_ms, 2)
-            resultados_por_pagina.append(
-                ResultadoPagina(
-                    numero_pagina=p_num,
-                    tipo=classification.tipo,
-                    exito=page_exito,
-                    error=page_error,
-                    duracion_ms=page_dur,
-                    preprocesado=preprocesado,
-                    metadatos_visuales=page_visuals,
-                    evidencias=page_evidences,
+                # Inferencia multimodal con Gemini 2.0 Flash en carril NEEDS_AI (US-11, US-12, US-18)
+                elif classification.tipo == TipoPagina.NEEDS_AI:
+                    t_ren = time.perf_counter()
+                    webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
+                    total_render_ms += (time.perf_counter() - t_ren) * 1000
+
+                    t_gem = time.perf_counter()
+                    gemini_res = invoke_gemini_multimodal_page(
+                        image_bytes=webp_bytes,
+                        page_number=p_num,
+                        parameters=canonical_params,
+                        page_text_hint=page.get_text(),
+                    )
+                    total_gemini_ms += (time.perf_counter() - t_gem) * 1000
+
+                    if not gemini_res.exito:
+                        page_exito = False
+                        page_error = gemini_res.error
+                        failed_pages.append(p_num)
+                    else:
+                        all_ai_findings.extend(gemini_res.hallazgos)
+                        for h in gemini_res.hallazgos:
+                            page_evidences.extend(h.evidencias)
+
+                page_dur = round(class_ms + prep_ms, 2)
+                resultados_por_pagina.append(
+                    ResultadoPagina(
+                        numero_pagina=p_num,
+                        tipo=classification.tipo,
+                        exito=page_exito,
+                        error=page_error,
+                        duracion_ms=page_dur,
+                        preprocesado=preprocesado,
+                        metadatos_visuales=page_visuals,
+                        evidencias=page_evidences,
+                    )
                 )
-            )
-    finally:
-        doc.close()
+        finally:
+            doc.close()
 
-    # Consolidar hallazgos aplicando precedencia absoluta de texto nativo sobre IA (US-10)
-    consolidated_all = consolidate_findings(all_spatial_findings, all_ai_findings)
-    findings_by_param = {}
-    for h in consolidated_all:
-        if h.parametro not in findings_by_param or h.confianza > findings_by_param[h.parametro].confianza:
-            findings_by_param[h.parametro] = h
+        # Consolidar hallazgos aplicando precedencia absoluta de texto nativo sobre IA (US-10)
+        consolidated_all = consolidate_findings(all_spatial_findings, all_ai_findings)
+        findings_by_param = {}
+        for h in consolidated_all:
+            if h.parametro not in findings_by_param or h.confianza > findings_by_param[h.parametro].confianza:
+                findings_by_param[h.parametro] = h
 
-    final_hallazgos = []
-    for p in canonical_params:
-        if p in findings_by_param:
-            final_hallazgos.append(findings_by_param[p])
-        else:
-            final_hallazgos.append(
-                HallazgoEnriquecido(
-                    parametro=p,
-                    valor="No detectado en el documento",
-                    confianza=0.0,
-                    metodo=MetodoExtraccion.SPATIAL_VECTOR,
-                    evidencias=[],
-                    valor_normalizado=None,
-                    formato_detectado="TEXT",
+        final_hallazgos = []
+        for p in canonical_params:
+            if p in findings_by_param:
+                final_hallazgos.append(findings_by_param[p])
+            else:
+                final_hallazgos.append(
+                    HallazgoEnriquecido(
+                        parametro=p,
+                        valor="No detectado en el documento",
+                        confianza=0.0,
+                        metodo=MetodoExtraccion.SPATIAL_VECTOR,
+                        evidencias=[],
+                        valor_normalizado=None,
+                        formato_detectado="TEXT",
+                    )
                 )
-            )
 
-    total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms + 10.0, 2)
-    job_status = EstadoCobertura.PARTIAL if failed_pages else EstadoCobertura.COMPLETE
+        total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms + 10.0, 2)
+        job_status = EstadoCobertura.PARTIAL if failed_pages else EstadoCobertura.COMPLETE
 
-    output = JobOutput(
-        pdf_hash=pdf_hash,
-        pipeline_version="2.2",
-        status=job_status,
-        nivel_cache=NivelCache.L0,
-        duracion_total_ms=total_dur_ms,
-        paginas_totales=total_pages,
-        paginas_completadas=total_pages - len(failed_pages),
-        paginas_pendientes=failed_pages,
-        resultados_por_pagina=resultados_por_pagina,
-        hallazgos=final_hallazgos,
-        telemetria=TelemetriaDesagregada(
-            hash_ms=1.2,
-            cache_ms=0.8,
-            fitz_ms=round(total_class_ms, 2),
-            classification_ms=round(total_class_ms, 2),
-            preprocess_ms=round(total_prep_ms, 2),
-            retrieval_ms=round(total_retrieval_ms, 2),
-            render_ms=round(total_render_ms, 2),
-            gemini_ms=round(total_gemini_ms, 2),
-            serialization_ms=2.0,
-            total_ms=total_dur_ms,
-        ),
-    )
+        output = JobOutput(
+            pdf_hash=pdf_hash,
+            pipeline_version="2.2",
+            status=job_status,
+            nivel_cache=NivelCache.NONE,
+            duracion_total_ms=total_dur_ms,
+            paginas_totales=total_pages,
+            paginas_completadas=total_pages - len(failed_pages),
+            paginas_pendientes=failed_pages,
+            resultados_por_pagina=resultados_por_pagina,
+            hallazgos=final_hallazgos,
+            telemetria=TelemetriaDesagregada(
+                hash_ms=1.2,
+                cache_ms=0.8,
+                fitz_ms=round(total_class_ms, 2),
+                classification_ms=round(total_class_ms, 2),
+                preprocess_ms=round(total_prep_ms, 2),
+                retrieval_ms=round(total_retrieval_ms, 2),
+                render_ms=round(total_render_ms, 2),
+                gemini_ms=round(total_gemini_ms, 2),
+                serialization_ms=2.0,
+                total_ms=total_dur_ms,
+            ),
+        )
 
-    MOCK_RESULTS_STORE[pdf_hash] = output
-    return output
+        # Indexación L1 y persistencia en L0
+        assoc_index = {h.parametro: h.evidencias for h in final_hallazgos if h.evidencias}
+        l1_entry = L1DocumentEntry(
+            pdf_hash=pdf_hash,
+            pipeline_version="2.2",
+            status=job_status,
+            paginas_totales=total_pages,
+            paginas_completadas=total_pages - len(failed_pages),
+            paginas_pendientes=failed_pages,
+            resultados_por_pagina=resultados_por_pagina,
+            indice_asociativo=assoc_index,
+            hallazgos_previos=final_hallazgos,
+            telemetria_original=output.telemetria,
+        )
+        set_l1_cache(pdf_hash, l1_entry)
+
+        if job_status == EstadoCobertura.COMPLETE:
+            set_l0_cache(pdf_hash, query_hash, output)
+            evaluate_and_create_l2_cache(pdf_hash, estimated_tokens=total_pages * 400)
+
+        MOCK_RESULTS_STORE[pdf_hash] = output
+        return output
+
+    # Prevención de estampidas concurrentes con singleflight (US-17)
+    return await singleflight_group.do(flight_key, _do_extraction)
 
 
 @app.post("/procesar/stream")
@@ -308,6 +357,28 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+
+    # 3. Consulta temprana L0 en streaming (US-14)
+    cached_l0 = get_l0_cache(pdf_hash, query_hash)
+    if cached_l0 is not None:
+        async def cached_stream_gen():
+            yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': cached_l0.paginas_totales, 'nivel_cache': 'L0'})}\n\n"
+            for p in cached_l0.resultados_por_pagina:
+                yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': cached_l0.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
+            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': cached_l0.status.value, 'nivel_cache': 'L0', 'duracion_total_ms': cached_l0.duracion_total_ms, 'paginas_totales': cached_l0.paginas_totales, 'paginas_pendientes': cached_l0.paginas_pendientes, 'hallazgos': [h.model_dump() for h in cached_l0.hallazgos]})}\n\n"
+        return StreamingResponse(cached_stream_gen(), media_type="text/event-stream")
+
+    # 4. Reutilización L1 en streaming (US-15)
+    cached_l1 = get_l1_cache(pdf_hash)
+    if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
+        resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
+        if resolved_l1 is not None:
+            async def l1_stream_gen():
+                yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': resolved_l1.paginas_totales, 'nivel_cache': 'L1'})}\n\n"
+                for p in resolved_l1.resultados_por_pagina:
+                    yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': resolved_l1.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
+                yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': resolved_l1.status.value, 'nivel_cache': 'L1', 'duracion_total_ms': resolved_l1.duracion_total_ms, 'paginas_totales': resolved_l1.paginas_totales, 'paginas_pendientes': resolved_l1.paginas_pendientes, 'hallazgos': [h.model_dump() for h in resolved_l1.hallazgos]})}\n\n"
+            return StreamingResponse(l1_stream_gen(), media_type="text/event-stream")
 
     async def event_generator():
         try:
@@ -437,7 +508,7 @@ async def procesar_documento_stream(
                 pdf_hash=pdf_hash,
                 pipeline_version="2.2",
                 status=job_status,
-                nivel_cache=NivelCache.L0,
+                nivel_cache=NivelCache.NONE,
                 duracion_total_ms=total_dur_ms,
                 paginas_totales=total_pages,
                 paginas_completadas=total_pages - len(failed_pages),
@@ -457,6 +528,27 @@ async def procesar_documento_stream(
                     total_ms=total_dur_ms,
                 ),
             )
+
+            # Indexación L1 y persistencia en L0
+            assoc_index = {h.parametro: h.evidencias for h in final_hallazgos if h.evidencias}
+            l1_entry = L1DocumentEntry(
+                pdf_hash=pdf_hash,
+                pipeline_version="2.2",
+                status=job_status,
+                paginas_totales=total_pages,
+                paginas_completadas=total_pages - len(failed_pages),
+                paginas_pendientes=failed_pages,
+                resultados_por_pagina=resultados_por_pagina,
+                indice_asociativo=assoc_index,
+                hallazgos_previos=final_hallazgos,
+                telemetria_original=output.telemetria,
+            )
+            set_l1_cache(pdf_hash, l1_entry)
+
+            if job_status == EstadoCobertura.COMPLETE:
+                set_l0_cache(pdf_hash, query_hash, output)
+                evaluate_and_create_l2_cache(pdf_hash, estimated_tokens=total_pages * 400)
+
             MOCK_RESULTS_STORE[pdf_hash] = output
 
             yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': output.status.value, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'paginas_pendientes': output.paginas_pendientes, 'hallazgos': [h.model_dump() for h in final_hallazgos]})}\n\n"

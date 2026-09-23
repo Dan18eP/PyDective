@@ -28,16 +28,18 @@ Se requiere evolucionar el motor de búsqueda de Pydective hacia un sistema de *
 
 Adoptar un pipeline de **Extracción Clave-Valor Enriquecida, Ventana de Contexto (KWIC) y Normalización de Entidades**, gobernado por las siguientes definiciones arquitectónicas:
 
-### 2.1 Normalización Lingüística y Tolerancia a Diacríticos (NFKD)
+### 2.1 Normalización Lingüística, Tolerancia a Diacríticos (NFKD) y Fallback de Kerning Apretado
 
 Toda comparación y búsqueda de parámetros debe ser inmune a diferencias de acentuación, mayúsculas y ligaduras tipográficas:
 - **Descomposición canónica NFKD:** Mediante `unicodedata.normalize('NFKD', ...)`, términos como `"facturación"`, `"número"` o `"póliza"` coinciden de manera exacta con `"facturacion"`, `"numero"` o `"poliza"`.
 - **Expansión de ligaduras:** Reemplazo determinista de caracteres especiales de fuentes PDF (`ﬁ` $\to$ `fi`, `ﬂ` $\to$ `fl`, `æ` $\to$ `ae`).
-- **Límites de palabra (`\b`):** Coincidencia mediante límites de palabra regex para prevenir falsos positivos (evitar que `"IVA"` coincida con `"PRIVADO"`).
+- **Estrategia de Búsqueda Escalonada (Evitar falsos negativos por kerning apretado):**
+  1. *Paso 1 (Límites de palabra estrictos):* Coincidencia mediante límites de palabra regex (`r"\b" + kw + r"\b"`), evitando falsos positivos como `"IVA"` en `"PRIVADO"`.
+  2. *Paso 2 (Fallback para palabras compuestas/fusionadas):* Si el Paso 1 arroja 0 resultados, se ejecuta un fallback de subcadena insensible (`casefold_substring`) y detección de CamelCase / separaciones numéricas para rescatar términos fusionados por software de maquetación (ej. `"TotalFactura"` o `"Subtotal100"`).
 
 ---
 
-### 2.2 Pipeline de Dos Etapas: Determinismo Espacial $O(N)$ + Asistencia Semántica
+### 2.2 Pipeline de Dos Etapas: Determinismo Espacial $O(N)$ con Umbrales Métricos Concretos
 
 El sistema implementará un enfoque escalonado para extraer el valor asociado a cualquier parámetro:
 
@@ -51,9 +53,13 @@ Etapa 1: Expansión de Sinónimos Canónicos (Opcional según catálogo base)
   ▼
 Etapa 2: Análisis Determinista Espacial O(N) con PyMuPDF
   - Extracción de palabras estructuradas con page.get_text("words"): (x0, y0, x1, y1, palabra, block_no, line_no, word_no).
-  - Detección espacial por vecindad geométrica en C:
-    * Vector horizontal derecho: Misma línea de texto (line_no idéntico), x0_valor > x1_clave, distancia ≤ umbral.
-    * Vector vertical inferior: Celda o línea adyacente directamente debajo (coincidencia de columna en tablas).
+  - Detección espacial gobernada por umbrales métricos fijos (en puntos PDF, 72 pt = 1 pulgada):
+    * Vector horizontal derecho (misma línea):
+      - Alineación vertical: |y0_clave - y0_valor| ≤ 4.0 pt
+      - Distancia horizontal máxima: x0_valor - x1_clave ≤ 180.0 pt (o ≤ 0.30 × page_width)
+    * Vector vertical inferior (tablas y formularios):
+      - Distancia vertical máxima: y0_valor - y1_clave ≤ 35.0 pt (espaciado entre líneas estándar)
+      - Solapamiento horizontal en X: overlap(x_clave, x_valor) ≥ 60%
   - Parser robusto de entidades y formatos:
     * Monedas: Soporte nativo para separadores hispanos ($ 4.500.000,00) y anglosajones ($4,500,000.00).
     * Fechas: DD/MM/YYYY, YYYY-MM-DD, o textuales ("30 de abril de 2024").
@@ -97,7 +103,16 @@ Cuando una página contenga elementos del catálogo visual (sellos, firmas manus
 
 ---
 
-### 2.5 Contrato de Dominio Enriquecido
+### 2.6 Regla de Autoridad y Resolución de Conflictos (Determinismo vs IA)
+
+Cuando tanto la Fase 2 (espacial determinista) como la Fase 3 (Gemini multimodal) extraigan un valor para el mismo parámetro en una página:
+1. **Autoridad del texto vectorial nativo:** Si la coincidencia proviene de texto digital nativo con alta certeza geométrica (distancia $\le$ umbrales y formato regex válido), **el dato determinista de PyMuPDF tiene precedencia absoluta**. Esto previene que alucinaciones visuales o artefactos de OCR del LLM alteren cifras o códigos literales exactos.
+2. **Autoridad multimodal en páginas visuales:** Si la página es escaneada, tiene bajo contraste o la relación espacial local presentó ambigüedad de layout, **prevalece el valor de Gemini Fase 3**.
+3. **Trazabilidad:** Cada resultado consigna `metodo_extraccion` (`espacial_determinista` | `multimodal_ia`) y su índice de `confianza` numérico.
+
+---
+
+### 2.7 Contrato de Dominio Enriquecido
 
 Se define la estructura `HallazgoEnriquecido`:
 

@@ -35,7 +35,9 @@ Se establece como regla obligatoria de arquitectura: **Determinismo antes de IA*
 
 Para evitar penalizaciones innecesarias de CPU, se aplican las siguientes reglas de diseño en `vision_service.py` con `opencv-python-headless`:
 
-1. **Bypass en páginas digitales limpias:** Si la Fase A detecta texto digital nativo suficiente (>80 palabras legibles), **no se ejecuta ningún algoritmo de visión ni OpenCV**.
+1. **Bypass configurable en páginas digitales limpias:** 
+   - El umbral de legibilidad se gobierna mediante la variable de entorno configurable `OPENCV_BYPASS_WORD_THRESHOLD` (valor predeterminado: 80 palabras).
+   - Si la Fase A extrae una cantidad de palabras legibles $\ge \text{OPENCV\_BYPASS\_WORD\_THRESHOLD}$ con baja ratio de caracteres basura y sin requerimiento explícito de pistas visuales, **se omite completamente el procesamiento de OpenCV**, permitiendo su calibración dinámica con datasets reales sin alterar el código fuente.
 2. **Deskew Selectivo y Acelerado:**
    - La búsqueda de ángulo de inclinación se acota estrictamente a un rango de **$\pm 15^\circ$** (un documento escaneado raramente supera los $10^\circ$; buscar a $90^\circ$ o $360^\circ$ multiplica por 6 el coste de CPU y arriesga rotar verticalmente texto horizontal).
    - El cálculo de la Transformada de Hough / momentos se realiza sobre una miniatura reducida a **500 px de ancho**; luego, el ángulo obtenido se aplica a la matriz de rotación de la imagen en alta resolución. Esto ahorra hasta un 75% del tiempo de CPU.

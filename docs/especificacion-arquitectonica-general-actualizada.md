@@ -558,15 +558,17 @@ key_failover_count
 partial_result
 ```
 
-Indicadores operativos iniciales:
+Indicadores operativos iniciales (Re-presupuestados con pipeline semántico y clave-valor completo):
 
 | Indicador | Objetivo de diseño |
 |---|---:|
 | Hit L0 | < 20 ms |
-| Hit L1, otras keywords | < 50 ms |
-| PDF digital de ~20 páginas, caché fría | p95 < 150 ms + render HTML |
-| PDF mixto | IA solo para páginas pendientes |
+| Hit L1, refiltrado con nuevas keywords | < 50 ms |
+| PDF digital ~20 páginas, caché fría (Fase A + Clave-Valor Espacial O(N) + KWIC + Normalización) | p95 < 200 ms + render HTML |
+| Time-To-First-Token (TTFT) en Pydective Chat | < 600 ms |
+| PDF mixto | IA solo para páginas pendientes (WebP prefetch en background) |
 | Key caída / agotada | sin reprocesar páginas exitosas |
+| Peticiones concurrentes repetidas (Dogpile) | 1 procesamiento real, N servidas desde caché (Singleflight) |
 
 Los objetivos son presupuestos de diseño, no SLA comercial.
 

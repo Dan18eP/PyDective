@@ -149,30 +149,39 @@ Invalidación: hash distinto; TTL; key `invalid`; no mezclar `cache_name` entre 
 
 ---
 
-## 6. Presupuesto de latencia (20 páginas, diseño)
+## 6. Presupuesto de latencia (20 páginas, diseño actualizado)
 
-Escenario A — PDF digital, keywords en texto, hit frío L0:
+Escenario A — PDF digital, keywords en texto, hit frío L0 (con extracción espacial clave-valor O(N) + KWIC + normalización de entidades):
 
-- hash ~5–15 ms  
-- fitz texto ~10–40 ms  
-- 0 red  
-- **objetivo p95 < 150 ms** más HTML  
+- hash SHA-256 ~5–10 ms  
+- fitz extracción texto + palabras `words` ~15–35 ms  
+- análisis espacial horizontal/vertical + regex de entidades ~10–25 ms  
+- consolidación y serialización `orjson` ~5–10 ms  
+- 0 red (cero Gemini)  
+- **objetivo p95 < 200 ms** más HTML  
 
 Escenario B — mismo PDF, otras keywords, hit L1:
 
-- hash + Redis + filtro  
+- hash + Redis (`orjson`) + refiltrado espacial/léxico  
 - **objetivo p95 < 50 ms**
 
 Escenario C — 20 escaneos sucios, 4 keys/proyectos, semáforo 4:
 
-- fase A + 20 WebP (CPU)  
-- 5 olas de 4 RTT Flash-Lite  
+- fase A + pre-acondicionamiento OpenCV (Deskew en miniatura + Otsu)  
+- render WebP directo con `fitz.Matrix` (en background durante clasificación)  
+- 5 olas de 4 RTT Gemini 2.0 Flash (`thinking_budget=0`)  
 - failover no reinicia olas ya OK  
-- **objetivo: 1–3 RTT efectivos**, no 20 RTT en serie y no 20 en paralelo que se 429  
+- **objetivo: 1–3 RTT efectivos**  
 
 Escenario D — hit L0:
 
 - **objetivo < 20 ms**
+
+Escenario E — 5 peticiones concurrentes idénticas en caché fría (Prevención de Dogpile):
+
+- 1 petición adquiere candado Singleflight (`SET lock:pdf:{hash} NX EX 60`) y ejecuta el pipeline.  
+- 4 peticiones concurrentes esperan el resultado publicado en Redis sin duplicar inferencia ni CPU.  
+- **objetivo: 0 llamadas duplicadas a IA**, todas servidas desde L0 en cuanto finaliza la primera.
 
 Estos números son **presupuestos de diseño**, no promesas de SLA.
 
@@ -229,18 +238,24 @@ JobOutput = { hash, resultados[página], cache_hit: l0|l1|l2|none }
 **Permitido**
 
 - Redis get/set async mientras no hay CPU pesada.  
-- Gather de llamadas Gemini ≤ semáforo.  
-- Thread pool chico para WebP de pendientes.
+- Gather de llamadas Gemini ≤ semáforo por proyecto (`ConcurrencyLimiter`).  
+- Thread pool chico para WebP de pendientes.  
+- **Prefetch de WebP durante Fase A:** si una página se clasifica como `needs_ai` en el loop inicial, despachar su renderizado WebP en background hacia el thread pool mientras el hilo continúa clasificando las páginas restantes.  
+- **Singleflight:** candado distribuido `SET lock:pdf:{hash} NX EX 60` para evitar dogpile en peticiones idénticas.  
+- **Cache de compilación de regex:** compilar patrones léxicos y de entidades una sola vez en el startup del módulo (`re.compile()`).  
+- **Pydantic v2:** serializar con `model_dump(mode="json")` y `orjson`.
 
 **Prohibido (ralentiza)**
 
-- 20 pixmaps simultáneos.  
-- Gather de 20 Gemini contra un solo proyecto.  
+- 20 pixmaps simultáneos en RAM.  
+- Gather de 20 Gemini contra un solo proyecto sin semáforo.  
 - Reabrir el PDF por cada página.  
 - Recomprimir WebP en cada retry de key.  
 - Relanzar fase A porque falló la página 19.  
 - Context Cache en el primer hit local (no hay imágenes que cachear).  
-- Batch API para el POST `/procesar`.
+- Batch API para el POST interactivo `/procesar`.  
+- Compilar expresiones regulares por cada request o por cada página.  
+- Usar `.dict()` heredado de Pydantic v1.
 
 ---
 

@@ -200,9 +200,9 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 |---|---|---|
 | RNF-001 | El hit L0 debe evitar todas las etapas de extracción. | Objetivo de diseño: < 20 ms, sin considerar red de cliente. |
 | RNF-002 | Una nueva búsqueda resuelta desde L1 debe evitar IA y render. | Objetivo de diseño: < 50 ms, sin considerar red de cliente. |
-| RNF-003 | Un PDF digital de ~20 páginas con caché fría debe resolverse localmente si contiene texto utilizable. | Objetivo p95: < 150 ms más render HTML, sujeto a hardware. |
+| RNF-003 | Un PDF digital de ~20 páginas con caché fría (Fase A + Clave-Valor Espacial O(N) + KWIC + Normalización) debe resolverse localmente. | Objetivo p95: < 200 ms más render HTML, sujeto a hardware. |
 | RNF-004 | El sistema debe limitar CPU/RAM durante render. | Render workers configurable, valor inicial 2–4. |
-| RNF-005 | El sistema debe limitar solicitudes IA en vuelo. | Semáforo configurable, valor inicial 4–8. |
+| RNF-005 | El sistema debe limitar solicitudes IA en vuelo por proyecto. | ConcurrencyLimiter configurable por `project_id`, valor inicial 4–8. |
 | RNF-006 | El sistema no debe re-renderizar una página por retry de key. | Un WebP por página pendiente y job. |
 | RNF-007 | El sistema no debe reabrir el PDF por cada página. | Una apertura lógica por job para clasificación. |
 
@@ -216,6 +216,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RNF-013 | El sistema debe manejar indisponibilidad temporal de Redis con política explícita. | Fallback controlado o error claro; nunca corrupción de respuesta. |
 | RNF-014 | La caché no debe ser requisito para que el pipeline básico pueda procesar un PDF en modo degradado. | Si Redis falla, se puede procesar sin hits/escrituras según configuración. |
 | RNF-015 | El sistema debe ofrecer fallback automático a caché in-memory (`InMemoryLRUCacheService`) si Redis no está disponible o está deshabilitado. | Se conmuta de forma transparente manteniendo el contrato `BaseCacheService` sin interrumpir el servicio. |
+| RNF-016 | El sistema debe prevenir el efecto estampida (dogpile) ante solicitudes concurrentes idénticas para el mismo PDF. | Mecanismo Singleflight (lock distribuido `SETNX` en Redis / `asyncio.Lock` en memoria): 1 sola ejecución real, $N-1$ solicitudes esperan y resuelven desde L0. |
 
 ### 5.3 Seguridad y privacidad
 
@@ -234,7 +235,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 |---|---|---|
 | RNF-030 | La lógica debe organizarse por responsabilidad. | HTTP, orquestación, caché, PDF, render, IA y keys están separados. |
 | RNF-031 | `jobs.py` debe ser el único escritor de L0/L1/L2. | No hay escrituras de caché desde servicios de bajo nivel. |
-| RNF-032 | Los contratos internos deben validarse con modelos tipados. | Entradas/salidas principales usan Pydantic o equivalente. |
+| RNF-032 | Los contratos internos deben validarse con modelos tipados. | Entradas/salidas principales usan Pydantic v2 con `model_dump(mode="json")`. |
 | RNF-033 | Las versiones de dependencias deben fijarse. | `requirements.txt` contiene restricciones/versiones acordadas. |
 | RNF-034 | Los cambios de arquitectura relevantes deben documentarse mediante ADR. | ADRs versionados en repositorio. |
 | RNF-035 | El sistema debe contar con pruebas unitarias e integración para los caminos críticos. | Suite cubre caché, clasificación, retry y resultados parciales. |
@@ -245,7 +246,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 |---|---|---|
 | RNF-040 | Los logs deben ser estructurados y correlacionables. | Incluyen `request_id` y metadatos operativos. |
 | RNF-041 | Las métricas no deben incluir texto completo de documentos ni secretos. | Revisión de telemetría confirma datos mínimos. |
-| RNF-042 | Deben poder medirse p50/p95/p99 de duración total y por fase. | Instrumentación diferencia caché, clasificación, render e IA. |
+| RNF-042 | Deben poder medirse p50/p95/p99 de duración total y por fase. | Instrumentación diferencia caché, clasificación, render, extracción espacial e IA. |
 | RNF-043 | Debe poder alertarse sobre 429, tasa de fallo y todas las keys no saludables. | Métricas/eventos cubren estos estados. |
 
 ---
@@ -265,6 +266,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RV-009 | Todas las keys inválidas o agotadas | Entregar páginas locales y marcar pendientes IA con error parcial |
 | RV-010 | Respuesta IA no cumple schema | Marcar error de página; no persistir L1 inválida |
 | RV-011 | Deadline global expirado | Cancelar solo pendientes seguras; consolidar parcial |
+| RV-012 | Inconsistencia o reescritura de L1 | Invalidar de inmediato punteros L2 asociados en Redis |
 
 ---
 

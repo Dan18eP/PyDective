@@ -112,17 +112,20 @@ Configuración Gemini: thinking_budget=0 (latencia mínima sin CoT innecesario),
 
 El WebP se produce una sola vez por página en un buffer en memoria y se reutiliza en reintentos de red o rotaciones de key.
 
-### 6. Control de concurrencia
+### 6. Control de concurrencia y gestión de cuota multi-usuario
 
 Se separan recursos CPU y red:
 
 | Recurso | Límite inicial |
 |---|---:|
 | Render WebP | 2–4 workers (con handles independientes de fitz.Document) |
-| Gemini concurrente | 4–8 solicitudes, semáforo global por project_id |
+| Gemini concurrente | 4–8 solicitudes por `project_id` |
 | Páginas por PDF | ~20 en v1 |
 
-El semáforo Gemini es global al proceso/proyecto; no se lanza una ráfaga ilimitada por cada request. Los límites del proveedor pueden provocar `429 RESOURCE_EXHAUSTED`, por lo que controlar la concurrencia es parte de la latencia y de la confiabilidad. [web:31]
+**Abstracción de Concurrencia (`ConcurrencyLimiter`):**
+- Para evitar que múltiples peticiones simultáneas de diferentes usuarios saturen el RPM de un proyecto en Gemini, se define una interfaz `BaseConcurrencyLimiter`.
+- En despliegues monoproceso: opera mediante `asyncio.BoundedSemaphore` agrupado por `project_id`.
+- En despliegues multi-worker (Uvicorn con múltiples procesos o réplicas en contenedor): conmuta transparentemente a un semáforo/Token Bucket distribuido sobre **Redis** (`redis_rate_limiter.py`), garantizando fairness y protegiendo el cupo global del proyecto de Google sin reescribir `key_pool.py`.
 
 ### 7. Pool de API keys con salud
 
@@ -145,22 +148,27 @@ La unidad de retry es la **página**, no el documento.
 
 Las API keys del mismo proyecto no se consideran multiplicadores automáticos de cuota. El límite de concurrencia se configura por cuota efectiva/proyecto, no por número de keys.
 
-### 8. Context Cache explícito de Google (L2)
+### 8. Context Cache explícito de Google (L2) y Regla de Invalidación
 
 L2 es una optimización opcional para reutilizar contenido multimodal en nuevas consultas del mismo PDF.
 
 - Se almacena un puntero `cache_name` junto con `pdf_hash`, `key_id` y `expire_at`.
 - **Salvaguarda de umbral mínimo:** Google exige un mínimo de ~32.768 tokens para crear un Context Cache. Si las páginas multimodales no alcanzan dicho umbral, la creación de L2 se omite de forma transparente para evitar errores `400 INVALID_ARGUMENT`.
+- **Atadura estricta a L1:** Cualquier reescritura, actualización del catálogo de imágenes o invalidación en L1 **elimina de inmediato el puntero L2 asociado** (`cache:l2:{pdf_hash}:{key_id}`). Esto garantiza que L2 jamás sirva contenido desincronizado con la evidencia visual re-analizada.
 - Solo se usa con la misma key/proyecto que creó el recurso.
 - Se crea mediante la API oficial de caché (`client.caches.create`) y se referencia como `cached_content` en solicitudes posteriores.
-- Su TTL se respeta; si vence, se recrea u omite sin bloquear el trabajo.
-- L2 no reemplaza Redis L0/L1.
 
-### 9. Persistencia de caché y serialización de alto rendimiento
+### 9. Persistencia de caché, serialización de alto rendimiento y prevención de Dogpile
 
-Redis (o equivalente) será el almacén de producción para L0 y L1. Para maximizar el rendimiento y reducir los tiempos de CPU en serialización de documentos con múltiples páginas:
-- Se utiliza `orjson` como motor de serialización/deserialización (5x-10x más veloz que el `json` estándar de Python).
-- Si Redis no está disponible o se deshabilita localmente, el sistema conmuta automáticamente a un modo degradado in-memory (`InMemoryLRUCacheService` con límite de tamaño LRU para evitar fugas de memoria).
+Redis (o equivalente) será el almacén de producción para L0 y L1. Para maximizar el rendimiento y evitar colapsos operativos:
+
+1. **Prevención de Dogpile (Cache Stampede / Singleflight):**
+   - Si se reciben $N$ solicitudes concurrentes para el mismo `pdf_hash` ante un miss de L0/L1, se aplica un candado distribuido mediante `SET lock:pdf:{hash} worker_id NX EX 60` (o `asyncio.Lock` en memoria).
+   - Solo la primera solicitud ejecuta el pipeline de extracción (Fases A y B). Las peticiones concurrentes restantes esperan con polling no bloqueante (intervalos de 100 ms) la publicación del resultado en Redis, resolviendo el 100% de las peticiones duplicadas desde caché sin multiplicar llamadas a Gemini ni consumo de CPU.
+2. **Serialización ultra-rápida:**
+   - Se utiliza `orjson` para serializar hacia y desde Redis. Los modelos Pydantic v2 utilizan `model_dump(mode="json")` directamente, evitando métodos heredados lentos.
+3. **Modo degradado in-memory:**
+   - Si Redis no está disponible o se deshabilita localmente, el sistema conmuta automáticamente a `InMemoryLRUCacheService` con límite LRU de 100 documentos para prevenir saturación de RAM.
 
 TTL inicial propuesto:
 

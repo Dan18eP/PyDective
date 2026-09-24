@@ -265,11 +265,11 @@ def process_chat_query(
     if not matched_evidences and text_evidences:
         matched_evidences.extend(text_evidences)
 
-    # 4. Si hay API key de Gemini configurada, sintetizar respuesta natural enriquecida
-    active_key = settings.api_keys_list[0] if settings.api_keys_list else None
-    if active_key and genai is not None:
+    # 4. Síntesis conversacional vía proveedor configurado (Gemini Cloud o LLM Local en CPU)
+    from app.services.providers import get_llm_provider
+    llm_provider = get_llm_provider()
+    if llm_provider.is_available():
         try:
-            client = genai.Client(api_key=active_key)
             context_summary = f"Total páginas del documento: {total_pages}.\n"
             if matched_findings:
                 context_summary += f"Hallazgos relevantes extraídos: {'; '.join(matched_findings)}.\n"
@@ -278,22 +278,21 @@ def process_chat_query(
             if page_texts:
                 context_summary += "\nTexto literal extraído de los folios del documento:\n" + "\n\n".join(page_texts[:3]) + "\n"
 
-            prompt = (
+            sys_instruction = (
                 "Eres el asistente forense documental de PyDective. "
                 "Responde en español de forma fluida, precisa y profesional a la siguiente pregunta del usuario, "
                 "basándote exclusivamente en el contexto documental proporcionado.\n"
                 "REGLAS OBLIGATORIAS:\n"
                 "1. Si el dato existe, cítalo con la página exacta como [Página X].\n"
-                "2. Si el dato NO figura en el documento, indícalo de forma clara y amable indicando que no figura registrado, sin repetir la pregunta literalmente.\n"
-                f"Contexto: {context_summary}\n"
-                f"Pregunta: {pregunta}"
+                "2. Si el dato NO figura en el documento, indícalo de forma clara y amable indicando que no figura registrado, sin repetir la pregunta literalmente."
             )
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=[prompt],
+            prompt = f"Contexto:\n{context_summary}\nPregunta: {pregunta}"
+
+            resp_text = llm_provider.generate_chat_response(
+                prompt=prompt,
+                system_instruction=sys_instruction,
             )
-            if response and response.text:
-                resp_text = response.text.strip()
+            if resp_text:
                 cited_matches = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]
                 pages = sorted(list(set(cited_matches + [e.page for e in matched_evidences])))
                 citas = [f"[Página {p}]" for p in pages]
@@ -303,7 +302,7 @@ def process_chat_query(
                     evidencias_relacionadas=matched_evidences[:3],
                 )
         except Exception as e:
-            logger.warning(f"Fallback a síntesis local tras error en Gemini Chat: {e}")
+            logger.warning(f"Fallback a síntesis local tras error en {llm_provider.name}: {e}")
 
     # 5. Modo de síntesis local: Si no se encontró evidencia, declinación natural y fluida
     if not matched_evidences:

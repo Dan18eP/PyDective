@@ -146,7 +146,7 @@ def ensure_local_llm_service(model_name: str = "qwen2.5:3b") -> subprocess.Popen
         return None
 
 
-def _check_and_warm_model(model_name: str, ollama_bin: str | None = None):
+def _check_and_warm_model(model_name: str, ollama_bin: str | None = None) -> str:
     """Verifica si el modelo especificado se encuentra descargado en el catalogo local."""
     try:
         req = urllib.request.Request("http://localhost:11434/api/tags")
@@ -161,16 +161,22 @@ def _check_and_warm_model(model_name: str, ollama_bin: str | None = None):
 
             if has_model:
                 print(f"  [ONLINE]  Modelo Local:        '{model_name}' disponible en catalogo")
+                return model_name
             else:
-                print(f"  [AVISO]   Modelo Local:        '{model_name}' no detectado en catalogo local")
-                bin_to_use = ollama_bin or find_ollama_executable()
-                if bin_to_use:
-                    print(f"  [LLM] Descargando modelo '{model_name}' via Ollama...")
-                    subprocess.run([bin_to_use, "pull", model_name], check=False)
+                # Usar modelo instalado existente para evitar bloqueo de descarga en arranque
+                usable_models = [m for m in installed if not m.startswith("bge")]
+                if usable_models:
+                    fallback_model = usable_models[0]
+                    print(f"  [ONLINE]  Modelo Local:        '{fallback_model}' (auto-seleccionado de modelos instalados)")
+                    from app.settings import settings
+                    settings.LOCAL_LLM_MODEL = fallback_model
+                    return fallback_model
                 else:
-                    print(f"  [LLM] Para descargarlo manualmente ejecuta: ollama pull {model_name}")
+                    print(f"  [AVISO]   Modelo Local:        '{model_name}' no detectado en catalogo local")
+                    print(f"  [LLM] Para descargarlo ejecuta: ollama pull {model_name}")
     except Exception:
         pass
+    return model_name
 
 
 def check_vision_engines():
@@ -254,6 +260,14 @@ def main():
     uv_bin = find_uv_executable()
 
     try:
+        import uvicorn
+        uvicorn.run(
+            "app.main:app",
+            host=host,
+            port=port,
+            reload=debug_mode,
+        )
+    except ImportError:
         if uv_bin:
             cmd = [
                 uv_bin,
@@ -269,13 +283,8 @@ def main():
                 cmd.append("--reload")
             subprocess.run(cmd, cwd=str(ROOT_DIR))
         else:
-            import uvicorn
-            uvicorn.run(
-                "app.main:app",
-                host=host,
-                port=port,
-                reload=debug_mode,
-            )
+            print("[PyDective] Error: uvicorn no encontrado.")
+            sys.exit(1)
     except KeyboardInterrupt:
         print("\n\n[PyDective] Deteniendo el servidor por solicitud del usuario...")
     finally:

@@ -1,0 +1,21 @@
+# Changelog: 24-09-2026
+
+- [Thursday]-[24/09/2026]-[00:18]-[Brandon Carranza] : Enhanced viewer search highlighting with dynamic DOM overlays and multi-theme visual grounding for extracted entities and visual objects.
+- [Thursday]-[24/09/2026]-[00:25]-[Brandon Carranza] : Implemented morphological segmentation in OpenCV for signatures and seals in raster scans and standalone images using connected component analysis.
+- [Thursday]-[24/09/2026]-[00:37]-[Brandon Carranza] : Integrated autonomous local OCR engine with RapidOCR (ONNX Runtime CPU AVX2), invisible text layer injection with PyMuPDF (render_mode=3), and multimodal fallback for documents without text layers.
+- [Thursday]-[24/09/2026]-[01:02]-[Brandon Carranza] : Fixed pipeline caching bug to prevent stale zero-finding cache serving and added live OCR stream fallback for SSE processing.
+- [Thursday]-[24/09/2026]-[01:25]-[Brandon Carranza] : Implemented universal multi-format ingestion layer in ingestion_service.py supporting standalone images (PNG, JPG, TIFF) and office documents (DOCX, XLSX, TXT) converted in-memory to PDF.
+- [Thursday]-[24/09/2026]-[01:40]-[Brandon Carranza] : Created massive 100-file multi-format synthetic generator in scripts/generate_100_multi_format_suite.py and generated ground truth manifest covering diverse legal, commercial, and financial formats.
+- [Thursday]-[24/09/2026]-[01:55]-[Brandon Carranza] : Performed massive 100-file automated forensic audit in tests/audit_100_suite.py and documented baseline precision metrics in AUDITORIA_100_REPORT.md.
+- [Thursday]-[24/09/2026]-[02:05]-[Brandon Carranza] : Refined legal entity spatial parsing in spatial_extraction_service.py and conversational grounding in chat_service.py to resolve ambiguous entity assignments.
+- [Thursday]-[24/09/2026]-[02:12]-[Brandon Carranza] : Implemented configurable multi-provider architecture under app/services/providers/ with BaseProvider, GeminiProvider (cloud), and LocalProvider (Ollama Qwen2.5:3b).
+- [Thursday]-[24/09/2026]-[02:18]-[Brandon Carranza] : Added automated dependency installer (install_dependencies.py) and application runner (run_app.py) with runtime environment checks and directory bootstrapping.
+- [Thursday]-[24/09/2026]-[02:22]-[Brandon Carranza] : Refined zero-hallucination declination gating in chat_service.py and tuned local LLM HTTP timeout to prevent request blocking.
+- [Thursday]-[24/09/2026]-[02:25]-[Brandon Carranza] : Performed comprehensive multi-format audit across scanned PDFs, forensic images, and spreadsheets, generating AUDITORIA_MULTIMODAL_METRICS.json.
+- [Thursday]-[24/09/2026]-[02:27]-[Brandon Carranza] : Enhanced launcher to auto-start local LLM service (Ollama daemon) and added run.py root alias for ergonomic startup.
+- [Thursday]-[24/09/2026]-[02:28]-[Brandon Carranza] : Resolved pipe delimiter stripping in XLSX cell extraction and enforced native UTF-8 encoding across DOCX and TXT parsers.
+- [Thursday]-[24/09/2026]-[02:29]-[Brandon Carranza] : Added dual vision engine switcher benchmark in app/services/florence_service.py and frontend UI, enabling simultaneous execution of RapidOCR and Florence-2 with exact coordinate grounding.
+- [Thursday]-[24/09/2026]-[02:40]-[Brandon Carranza] : Updated installer and initializer with vision dependencies (RapidOCR, ONNX Runtime, Transformers, Torch) and enforced strict zero-emoji policy across logs and banners.
+- [Thursday]-[24/09/2026]-[03:11]-[Brandon Carranza] : Fixed text clipping in invisible text layer and added generic name extraction heuristics for RapidOCR on challenging scanned PDFs (doc_051_escaneo.pdf).
+- [Thursday]-[24/09/2026]-[03:22]-[Brandon Carranza] : Updated frontend presets (+ Nombre / Titular, + Notario, + Valor Declarado, + Cliente) and enabled cross-platform Linux / POSIX support for installer, launcher, and clipboard API fallback.
+- [Thursday]-[24/09/2026]-[03:34]-[Brandon Carranza] : Formulated and integrated ADR-006 (Dual Vision Engine Architecture and Exact Grounding) and ADR-007 (Cross-Platform Universal Bootstrap and Lifecycle Management).

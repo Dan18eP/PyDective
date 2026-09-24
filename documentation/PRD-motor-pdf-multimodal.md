@@ -148,26 +148,34 @@ Pymes y equipos administrativos que trabajan con facturas, soportes contables, c
   - Vinculación con evidencias visuales adyacentes (firmas y sellos cercanos).
 - Extracción de texto limpio y detección de coincidencias nativas.
 - Análisis multimodal selectivo (Gemini Flash con semáforo global) solo para páginas `needs_ai`.
+- **Arquitectura Dual de Visión Local en CPU:** Alternancia dinámica entre **RapidOCR** (detección/reconocimiento ultrarrápido <180ms) y **Florence-2** (visión profunda y grounding denso).
+- **Modo Benchmark Simultáneo:** Capacidad de ejecutar ambos motores concurrentemente en paralelo para evaluar latencia y exactitud en vivo.
+- **Ingesta Universal Multi-Formato:** Soporte nativo para imágenes rasterizadas (PNG, JPG, TIFF) y formatos ofimáticos (DOCX, XLSX, TXT) convertidos en memoria a PDF.
+- **Inyección de Capa OCR Invisible (`render_mode=3`):** Los documentos escaneados adquieren una capa de texto invisible que permite seleccionarlos y buscarlos como PDFs digitales en el visor.
+- **Arquitectura Multi-Proveedor Desacoplada:** Posibilidad de operar en la nube (Google Gemini) o 100% desconectado con modelos locales LLM vía Ollama (Qwen2.5:3b).
 - **Módulo Pydective Chat:** Interfaz conversacional conectada a L1/L2 para interrogar al PDF con citas obligatorias de página.
 - **Visor de PDF interactivo con buscador de texto exacto estilo Chrome (`Ctrl+F`):**
   - Renderizado de alta fidelidad del PDF en la interfaz mediante PDF.js.
   - Buscador de texto exacto con contador dinámico ($N$ de $M$), botones anterior/siguiente y atajos de teclado (`Enter`, `Shift+Enter`).
   - Resaltado global de todas las ocurrencias en amarillo y la activa en naranja con desplazamiento suave (*auto-scroll*).
-- **Visual Grounding bidireccional 100% confiable:**
-  - Al pulsar una cita de chat o hallazgo, el visor salta a la página y resalta el recuadro delimitador (*bounding box*) exacto de la evidencia (texto, sello, firma, código de barras, logo).
+- **Visual Grounding bidireccional 100% confiable y Coordenadas BBox Exactas:**
+  - Al pulsar una cita de chat o hallazgo, el visor salta a la página y resalta el recuadro delimitador (*bounding box*) exacto de la evidencia (texto, sello, firma, código de barras, logo), permitiendo copiar coordenadas `[ymin, xmin, ymax, xmax]`.
 - **Cero datos mock:** Todas las coordenadas, extracciones y respuestas se calculan directamente del binario del PDF analizado de punta a punta.
 - Soporte para resultados parciales aislados por página.
 - Modo degradado tolerante a fallos de Redis (memoria local automática).
 - Soporte de streaming de progreso por Server-Sent Events (SSE).
+- **Compatibilidad Multiplataforma Total:** Instaladores y lanzadores universales para distribuciones Linux (POSIX) y Windows.
 
-### Tipos de PDF soportados
+### Tipos de documentos soportados
 
 | Tipo de documento | Expectativa MVP |
 |---|---|
 | PDF digital con texto | Resolución local ultrarrápida (<150 ms) sin coste de IA |
 | PDF digital con imágenes/logos | Texto local; catalogación y descripción de imágenes por página |
 | Escaneo inclinado o manchado | Preprocesamiento determinista (Deskew + Otsu) antes de evaluar IA |
-| Escaneo sin capa de texto | Limpieza determinista + análisis multimodal por página |
+| Escaneo sin capa de texto | OCR local (RapidOCR/Florence-2) con inyección de capa invisible |
+| Imágenes (PNG, JPG, TIFF) | Conversión en memoria a PDF y extracción OCR/visión profunda |
+| Documentos Office (DOCX, XLSX, TXT) | Conversión en memoria preservando UTF-8 y separación de celdas |
 | Página vacía | Detección determinista; resultado vacío sin llamar a IA |
 
 ---

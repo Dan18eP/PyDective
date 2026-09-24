@@ -619,15 +619,19 @@ Autenticación, multi-tenant, roles y auditoría se consideran evolución poster
 
 ## 12. Dependencias previstas
 
-Las versiones exactas se fijan en la fase de implementación y se verifican contra la documentación vigente del SDK.
+Las versiones exactas se fijan en la fase de implementación y se verifican contra la documentación vigente del SDK y gestores de paquetes (`uv` / `pyproject.toml`).
 
 - `fastapi`, `uvicorn`, `python-multipart`, `jinja2`
 - `pymupdf`, `pillow`
 - `google-genai`, `pydantic`
-- `redis`
+- `rapidocr_onnxruntime`, `onnxruntime` (inferencia local en CPU con AVX2)
+- `transformers`, `torch` (inferencia multimodal profunda con Florence-2)
+- `openpyxl`, `python-docx` (ingesta universal ofimática convertida a PDF)
+- `opencv-python-headless`, `numpy` (segmentación morfológica, binarización y deskew)
+- `redis`, `orjson`
 - `pytest`, `pytest-asyncio`, herramientas de calidad y tipado
 
-No se asumen atributos de SDK no verificados. En particular, la creación y uso de Context Cache se validará con la versión fijada de `google-genai`, usando interfaces reales como `client.caches.create(...)` y `cached_content` cuando correspondan. [web:24][web:30]
+No se asumen atributos de SDK no verificados. En particular, la creación y uso de Context Cache se validará con la versión fijada de `google-genai`, usando interfaces reales como `client.caches.create(...)` y `cached_content` cuando correspondan.
 
 ---
 
@@ -635,24 +639,26 @@ No se asumen atributos de SDK no verificados. En particular, la creación y uso 
 
 Incluido:
 
-- Un PDF por solicitud.
+- Un documento por solicitud (PDF o formatos universales convertidos en memoria: PNG, JPG, TIFF, DOCX, XLSX, TXT).
 - ~20 páginas por documento como límite inicial.
-- Búsqueda por parámetros escritos manualmente.
-- Extracción híbrida local + IA.
-- Caché L0/L1 Redis.
+- Búsqueda por parámetros dinámicos con chips de selección rápida interactiva.
+- Extracción híbrida local + motores de visión autónomos (RapidOCR / Florence-2) + IA Cloud (Gemini) o Local (Ollama Qwen2.5:3b).
+- Modo benchmark concurrente para evaluación comparativa de latencia y precisión.
+- Inyección de capa OCR invisible (`render_mode=3`) para selección de texto en escaneos e imágenes.
+- Visor interactivo PDF.js con buscador de coincidencias exactas estilo Chrome (`Ctrl+F`) y grounding visual bidireccional.
+- Caché L0/L1 Redis con fallback resiliente en memoria (`InMemoryLRUCacheService`).
 - Failover por página.
-- SSR Jinja2.
+- SSR Jinja2 con Tailwind CSS v4.
+- Compatibilidad multiplataforma nativa para entornos Linux (POSIX) y Windows.
 
 Fuera de alcance:
 
-- Carga masiva y colas de trabajos.
-- Progreso por WebSocket.
-- Persistencia de PDFs originales.
-- OCR clásico (ej. Tesseract) como tercer carril.
-- Multi-tenant y autenticación.
-- Integraciones externas de negocio.
-- Compartir Context Cache entre keys distintas.
-- Batch API para el endpoint interactivo: se reserva para procesamiento asíncrono masivo, no para el POST web. [web:31][web:32]
+- Carga masiva por lotes de miles de documentos simultáneos.
+- Progreso por WebSocket (se utiliza Server-Sent Events / SSE reactivo).
+- Persistencia permanente de documentos sensibles en bases de datos externas.
+- Multi-tenant y autenticación RBAC empresarial profunda.
+- Integraciones directas con ERPs o CRM propietarios.
+- Batch API para el endpoint interactivo web.
 
 ---
 
@@ -669,6 +675,8 @@ Fuera de alcance:
 - [ ] L2 respeta key/proyecto y TTL; un cache vencido se recrea o se omite sin 500.
 - [ ] `main.py` no incluye lógica de extracción, caché ni IA.
 - [ ] Todas las respuestas tienen resultados ordenados por página y estado explícito.
+- [ ] Documentos escaneados o imágenes puras adquieren capa de texto invisible seleccionable en el visor.
+- [ ] Los scripts de arranque y ciclo de vida de procesos operan limpiamente en Linux y Windows sin procesos huérfanos.
 
 ---
 
@@ -684,5 +692,22 @@ Fuera de alcance:
 8. Context Cache L2.
 9. Middleware HTTP, pruebas de integración y carga.
 10. Plantillas finales y refinamiento de UX.
+11. Motores locales de visión (RapidOCR / Florence-2) y benchmark simultáneo (ADR-006).
+12. Portabilidad universal multiplataforma Linux/Windows y scripts de ciclo de vida (ADR-007).
 
-La prioridad es validar el contrato `JobOutput` y el camino local/cacheado antes de integrar o pulir la capa visual.
+---
+
+## 16. Arquitectura de Inferencia Local y Ciclo de Vida Multiplataforma
+
+> [!NOTE]
+> PyDective implementa un desacoplamiento estricto entre el motor de interfaz web (FastAPI/Jinja2), el orquestador de extracción de documentos (`jobs.py`), los motores locales de visión basados en CPU (RapidOCR con ONNX Runtime y Florence-2 con Hugging Face Transformers) y los proveedores de modelos de lenguaje (Gemini Cloud y Ollama Local).
+
+### 16.1 Inferencia 100% sobre CPU con Aceleración Vectorial AVX2
+Para garantizar la viabilidad del sistema en despliegues con recursos contenidos y auditorías forenses desconectadas:
+- **RapidOCR:** Convierte las páginas rasterizadas a tensores NumPy, ejecutando detección de texto con DBNet y reconocimiento con CRNN/SVTR bajo ONNX Runtime optimizado para CPU, entregando coordenadas `[x, y, w, h]` en $<180\text{ ms}$.
+- **Florence-2:** Procesa imágenes mediante atención espacial sobre parches visuales, generando delimitadores normalizados `[ymin, xmin, ymax, xmax]` en escala 0–1000 para grounding denso de sellos, firmas y entidades complejas.
+
+### 16.2 Aislamiento de Procesos en Linux y Windows
+El ciclo de vida del servicio local Ollama (`ollama serve`) se gobierna con aislamiento formal:
+- **En Windows:** `creationflags=subprocess.CREATE_NEW_PROCESS_GROUP` para independizar la consola y gestionar señales de interrupción de forma controlada.
+- **En Linux / POSIX:** `start_new_session=True` para desacoplar el grupo de procesos (SID/PGID) y permitir una terminación limpia mediante `SIGTERM` sin dejar procesos zombis en el sistema.

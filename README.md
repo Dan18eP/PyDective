@@ -1,68 +1,102 @@
-# PyDective — Motor Documental Multimodal Ultra-Rápido
+# PyDective — Motor Documental Multimodal Ultra-Rapido
 
-> **Extracción documental quirúrgica y agnóstica (~20 páginas) a velocidad nativa en C con PyMuPDF, preprocesamiento determinista selectivo con OpenCV e IA multimodal selectiva con Gemini 2.0 Flash.**
-
----
-
-## ⚡ Filosofía Arquitectónica: Evidencia y Cero Sobre-Ingeniería
-
-PyDective no es solo para facturas. Es un motor de inteligencia documental universal diseñado para analizar **contratos, pólizas, actas, soportes legales, historias clínicas y cualquier tipo documental** a partir de parámetros arbitrarios provistos por el usuario.
-
-### Pilares de Rendimiento (ADR-001 a ADR-004)
-1. **Carril Digital Cero-IA (PyMuPDF):** Extracción espacial $O(N)$ nativa en C (`page.get_text("words")`) sin costo de red ni inferencia.
-2. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarización Otsu solo para páginas escaneadas o degradadas.
-3. **Visión Multimodal Quirúrgica (Gemini 2.0 Flash):** Renderizado baseline a 1024 px WebP q75 únicamente para páginas con señal física deficiente (`NEEDS_AI`), firmas manuscritas o sellos oficiales.
-4. **Caché Escalonada y Singleflight:**
-   - **L0:** Respuestas HTML/JSON instantáneas por `(pdf_hash, query_hash)`.
-   - **L1:** Índice asociativo `parametro_normalizado -> list[Evidence]` reutilizable entre distintas consultas sin reabrir el PDF.
-   - **Singleflight:** Candado distribuido en Redis para evitar estampidas (dogpile effect).
-5. **Pydective Chat Grounded:** Búsqueda previa en el índice L1 antes de invocar a Gemini, reduciendo un 80% de tokens de entrada con citas verificables `[Página X]`.
+> [!NOTE]
+> Extraccion documental quirurgica y agnostica (~20 paginas) a velocidad nativa en C con PyMuPDF, preprocesamiento determinista selectivo con OpenCV, motores locales de vision autonoma (RapidOCR / Florence-2 en CPU) e IA multimodal selectiva (Gemini Flash o LLM local con Ollama).
 
 ---
 
-## 🚀 Inicio Rápido con `uv`
+## 1. Filosofia Arquitectonica: Evidencia y Cero Sobre-Ingenieria
 
-El proyecto utiliza [`uv`](https://github.com/astral-sh/uv) para la gestión ultrarrápida del entorno y dependencias en Python 3.12+.
+PyDective es un motor de inteligencia documental universal disenado para analizar **contratos, polizas, actas, soportes legales, balances financieros, historias clinicas y cualquier tipo documental** a partir de parametros arbitrarios provistos por el usuario o seleccionados mediante chips interactivos.
 
-### 1. Clonar y configurar entorno
+### Pilares de Rendimiento (ADR-001 a ADR-007)
+1. **Carril Digital Cero-IA (PyMuPDF):** Extraccion espacial $O(N)$ nativa en C (`page.get_text("words")`) sin costo de red ni inferencia.
+2. **Motores Locales de Vision Autonoma en CPU:**
+   - **RapidOCR:** Inferencia ultrarrapida (<180 ms por pagina) con ONNX Runtime y extensiones vectoriales AVX2.
+   - **Florence-2:** Inferencia profunda de Microsoft con grounding denso y generacion de bounding boxes normalizados `[ymin, xmin, ymax, xmax]` en escala 0–1000.
+   - **Modo Benchmark Simultaneo:** Evaluacion comparativa en vivo ejecutando ambos motores concurrentemente.
+3. **Ingesta Universal Multi-Formato en Memoria:** Conversion automatica en memoria a PDF equivalente para imagenes (PNG, JPG, TIFF) y formatos ofimaticos (DOCX, XLSX, TXT) preservando UTF-8 nativo y estructura tabular.
+4. **Inyeccion de Capa OCR Invisible (`render_mode=3`):** Habilita la seleccion de texto con cursor y la busqueda interactiva tipo Chrome (`Ctrl+F`) sobre documentos escaneados e imagenes en el visor interactivo (PDF.js).
+5. **Arquitectura Multi-Proveedor Desacoplada:** Operacion en la nube con Google Gemini o 100% offline con proveedores locales via Ollama (`qwen2.5:3b`).
+6. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarizacion Otsu solo para paginas escaneadas o degradadas.
+7. **Cache Escalonada y Singleflight:**
+   - **L0:** Respuestas HTML/JSON instantaneas por `(pdf_hash, query_hash)` (<20 ms).
+   - **L1:** Indice asociativo `parametro_normalizado -> list[Evidence]` reutilizable entre distintas consultas sin reabrir el PDF (<50 ms).
+   - **Singleflight:** Candado distribuido en Redis / asyncio lock en memoria para evitar estampidas (*dogpile effect*).
+8. **Pydective Chat Grounded:** Busqueda previa en el indice L1 antes de invocar al modelo, reduciendo un 80% de tokens de entrada con citas verificables `[Pagina X]` y salto visual directo.
+
+---
+
+## 2. Instalacion y Arranque Multiplataforma
+
+El proyecto provee scripts autonomos de instalacion e inicio compatibles de forma nativa con **Linux (Ubuntu, Debian, Fedora, Arch)** y **Windows**.
+
+### Opcion A: Inicio Rapido en Linux / POSIX
+
 ```bash
-# Clonar el repositorio
+# 1. Clonar el repositorio
 git clone https://github.com/Dan18eP/PyDective.git
 cd PyDective
 
-# Crear y sincronizar el entorno virtual
+# 2. Conceder permisos de ejecucion y correr instalador
+chmod +x install.sh run.sh
+./install.sh
+
+# 3. Iniciar la aplicacion
+./run.sh
+```
+
+### Opcion B: Inicio Rapido en Windows
+
+```powershell
+# 1. Clonar el repositorio
+git clone https://github.com/Dan18eP/PyDective.git
+cd PyDective
+
+# 2. Ejecutar el instalador automatizado
+python install_dependencies.py
+
+# 3. Iniciar la aplicacion
+python run.py
+```
+
+### Opcion C: Gestion Avanzada con `uv`
+
+Si utilizas el gestor [`uv`](https://github.com/astral-sh/uv):
+
+```bash
+# Sincronizar el entorno virtual
 uv sync
+
+# Ejecutar el servidor con recarga en caliente
+uv run python run.py
 ```
 
-### 2. Variables de entorno
-Copia la plantilla y configura tus claves:
-```bash
-cp .env.example .env
-# Edita .env agregando tus GEMINI_API_KEYS
-```
-
-### 3. Ejecutar el servidor de desarrollo
-```bash
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
 Abre en tu navegador: [http://localhost:8000](http://localhost:8000)
+
+> [!TIP]
+> Si el proveedor local `LLM_PROVIDER=local` esta configurado en `.env`, el lanzador `run.py` detectara o iniciara automaticamente el daemon de Ollama en segundo plano sin intervencion manual.
 
 ---
 
-## 📡 API Endpoints Principales
+## 3. Endpoints Principales de la API
 
-| Método | Endpoint | Descripción |
+| Metodo | Endpoint | Descripcion |
 |---|---|---|
-| `GET` | `/` | Interfaz interactiva de usuario (Jinja2 SSR + Vanilla CSS/JS) |
-| `GET` | `/health` | Chequeo de salud, versión del pipeline y modelo activo |
-| `POST` | `/procesar` | Procesamiento sincrónico directo devolviendo `JobOutput` |
-| `POST` | `/procesar/stream` | Transmisión de progreso en tiempo real vía Server-Sent Events (SSE) |
-| `GET` | `/resultados/{pdf_hash}` | Vista de dictamen forense y desglose por página |
+| `GET` | `/` | Interfaz interactiva de usuario (Jinja2 SSR + Tailwind CSS v4) |
+| `GET` | `/health` | Chequeo de salud, version del pipeline, modelo activo y telemetria |
+| `POST` | `/procesar` | Procesamiento sincronico directo devolviendo `JobOutput` |
+| `POST` | `/procesar/stream` | Transmision de progreso en tiempo real via Server-Sent Events (SSE) |
+| `GET` | `/documentos/{pdf_hash}/raw` | Entrega segura del binario PDF para el visor interactivo PDF.js |
+| `GET` | `/documentos/{pdf_hash}/search` | Buscador de coincidencias exactas estilo Chrome en el PDF |
+| `GET` | `/resultados/{pdf_hash}` | Vista de dictamen forense en Split-View con visor y tabla de hallazgos |
 | `POST` | `/chat/{pdf_hash}` | Pydective Chat documental multi-turno con grounding en L1 |
 
 ---
 
-## 🧪 Pruebas Automatizadas
+## 4. Pruebas Automatizadas
+
+La suite de pruebas contiene 136 tests automatizados que cubren validacion de entrada, clasificacion determinista, extraccion espacial, proveedores LLM, caching y visor interactivo:
 
 ```bash
 uv run pytest

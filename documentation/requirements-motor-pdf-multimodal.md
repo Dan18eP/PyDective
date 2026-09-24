@@ -198,6 +198,12 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-101 | El sistema debe implementar un buscador de texto exacto en el visor emulando la experiencia de Chrome PDF (`Ctrl+F`). | Entrada de búsqueda con contador dinámico ($N$ de $M$), botones anterior/siguiente, atajos de teclado (`Enter`, `Shift+Enter`), resaltado de todas las ocurrencias en amarillo y la activa en naranja con auto-scroll. |
 | RF-102 | El sistema debe implementar visual grounding bidireccional mediante recuadros delimitadores (*bounding box overlays*) animados para citas de chat y evidencias de hallazgos. | Al pulsar una cita o hallazgo, el visor salta a la página y resalta con exactitud matemática el elemento (texto, sello, firma, código de barras o logo). |
 | RF-103 | El sistema debe exponer un endpoint seguro de entrega del archivo PDF binario (`GET /documentos/{pdf_hash}/raw`). | Entrega el flujo binario con cabecera `Content-Type: application/pdf` para su consumo por el visor. |
+| RF-104 | El sistema debe admitir la ingesta de formatos no PDF (PNG, JPG, TIFF, DOCX, XLSX, TXT) convirtiéndolos a PDF equivalente en memoria. | Conversión en memoria transparente preservando texto UTF-8 nativo y estructura tabular sin alterar la API. |
+| RF-105 | El sistema debe disponer de un motor OCR local autónomo (RapidOCR) ejecutable en CPU con inyección de texto invisible (`render_mode=3`). | Detección y reconocimiento en <200 ms por página con habilitación de selección de texto en visor PDF.js. |
+| RF-106 | El sistema debe incorporar un motor de visión profunda local (Florence-2) para grounding denso y extracción en documentos complejos. | Generación de bounding boxes normalizados [ymin, xmin, ymax, xmax] en escala 0-1000. |
+| RF-107 | El sistema debe ofrecer un modo de benchmark simultáneo que ejecute ambos motores de visión concurrentemente. | El selector del frontend permite activar ambos motores y comparar latencias y recuentos de hallazgos. |
+| RF-108 | El sistema debe desacoplar el proveedor de inteligencia mediante una arquitectura multi-proveedor (Gemini Cloud vs Ollama Local). | Alternancia transparente de proveedor sin alterar el contrato de inferencia o chat documental. |
+| RF-109 | El sistema debe proveer scripts de instalación y ejecución compatibles con Linux (POSIX) y Windows. | Detección automática de binarios de uv y ollama, arranque desacoplado de daemon y copiado resiliente en navegador. |
 
 ---
 
@@ -249,6 +255,8 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RNF-034 | Los cambios de arquitectura relevantes deben documentarse mediante ADR. | ADRs versionados en repositorio. |
 | RNF-035 | El sistema debe contar con pruebas unitarias e integración para los caminos críticos. | Suite cubre caché, clasificación, retry y resultados parciales. |
 | RNF-050 | Ausencia total de datos mock o simulados en los flujos de extracción y visualización. | Toda la información, coordenadas bboxes, citas y respuestas provienen del binario del PDF analizado de punta a punta. |
+| RNF-051 | Inferencia local 100% sobre CPU con aceleración vectorial AVX2. | Los motores RapidOCR y Florence-2 operan sin requerir GPUs dedicadas ni paquetes de sistema binarios externos. |
+| RNF-052 | Aislamiento y ciclo de vida limpio de procesos daemon en segundo plano. | Uso de start_new_session=True en POSIX y CREATE_NEW_PROCESS_GROUP en Windows para desacoplar Ollama y evitar procesos huérfanos. |
 
 ### 5.5 Observabilidad
 
@@ -308,6 +316,8 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | ADR-003 | Define extracción semántica clave-valor, ventanas de contexto (KWIC) y normalización de entidades |
 | ADR-004 | Define optimización empírica, indexación asociativa L1 y benchmark de calibración |
 | ADR-005 | Define visor de PDF interactivo, buscador Chrome-like, grounding visual bidireccional y cero mocks |
+| ADR-006 | Define arquitectura dual de visión (RapidOCR vs Florence-2), benchmark en vivo y capa invisible |
+| ADR-007 | Define compatibilidad universal multiplataforma (Linux / Windows) y ciclo de vida de procesos daemon |
 | Especificación arquitectónica general | Define módulos, flujos y contratos |
 | Estrategia de pruebas | Debe mapear cada caso crítico a RF/RNF/RV |
 | Historias de usuario | Deben referenciar requisitos aplicables |

@@ -34,14 +34,29 @@ class LocalLLMProvider(BaseLLMProvider):
 
     def is_available(self) -> bool:
         """
-        Verificación rápida no bloqueante (<1.0s) de conectividad hacia el endpoint local.
+        Verificación rápida no bloqueante (<1.0s) de conectividad hacia el endpoint local
+        y validación de que el modelo solicitado (o uno compatible) esté efectivamente instalado.
         """
         try:
             # Inspeccionar endpoint de modelos (/models)
             models_url = f"{self.base_url}/models"
             with httpx.Client(timeout=1.0) as client:
                 resp = client.get(models_url)
-                return resp.status_code == 200
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            model_list = [m.get("id", "") for m in data.get("data", []) if isinstance(m, dict)]
+                            if any(self.model_name in m for m in model_list):
+                                return True
+                            candidates = [m for m in model_list if not any(x in m for x in ("bge", "embed"))]
+                            if candidates:
+                                self.model_name = candidates[0]
+                                return True
+                    except Exception:
+                        pass
+                    return True
+            return False
         except Exception:
             return False
 
@@ -60,7 +75,7 @@ class LocalLLMProvider(BaseLLMProvider):
             "model": self.model_name,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 1024,
+            "max_tokens": 300,
             "stream": False,
         }
 

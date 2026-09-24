@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Model & AI
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
     GEMINI_API_KEYS: str = Field(
         default="",
         description="Comma-separated list of Google Gemini API keys"
@@ -32,16 +32,16 @@ class Settings(BaseSettings):
 
     # Provider Architecture (Cloud vs Local LLM)
     LLM_PROVIDER: str = Field(
-        default="auto",
-        description="LLM Provider to use: 'auto', 'gemini', or 'local'"
+        default="gemini",
+        description="LLM Provider to use: 'gemini', 'auto', or 'local'"
     )
     LOCAL_LLM_BASE_URL: str = Field(
         default="http://localhost:11434/v1",
         description="OpenAI-compatible base URL for local inference (Ollama, llama.cpp, vLLM, Kev)"
     )
     LOCAL_LLM_MODEL: str = Field(
-        default="qwen2.5:3b",
-        description="Model identifier for local inference (e.g. qwen2.5:3b, llama3.2:3b, kev)"
+        default="llama3.2:3b",
+        description="Model identifier for local inference (e.g. llama3.2:3b, qwen2.5:3b, kev)"
     )
     LOCAL_LLM_TIMEOUT_SECONDS: float = Field(
         default=60.0,

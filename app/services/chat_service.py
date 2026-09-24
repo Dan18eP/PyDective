@@ -14,6 +14,7 @@ from app.domain.errors import DocumentoNoEncontradoOExpiradoError
 from app.domain.enums import MetodoExtraccion
 from app.services.cache_service import get_l1_cache, L1DocumentEntry
 from app.services.markdown_service import get_or_create_page_indexed_markdown
+from app.services.markdown_search_service import deterministic_search
 from app.services.semantic_extraction_service import normalize_parameter
 from app.settings import settings
 
@@ -60,6 +61,7 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
     is_signature = any(kw in query_norm for kw in ("firma", "firmas", "firmado", "rubrica", "firmantes"))
     is_seal = any(kw in query_norm for kw in ("sello", "sellos", "notaria", "notarial", "autenticado", "estampilla"))
     is_photo = any(kw in query_norm for kw in ("foto", "fotografia", "fotografias", "datacenter", "servidor"))
+    is_general_image = any(kw in query_norm for kw in ("imagen", "imagenes", "imágenes", "elemento visual", "elementos visuales", "grafico o imagen"))
 
     found_pages: List[int] = []
     item_type = ""
@@ -88,6 +90,9 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
             elif is_chart and sem == "diagrama":
                 matched = True
                 item_type = "gráfico o diagrama técnico"
+            elif is_general_image and sem in ("diagrama", "fotografia", "logotipo", "codigo_barras", "codigo_qr", "firma_manuscrita", "sello_oficial"):
+                matched = True
+                item_type = f"elemento visual ({sem.replace('_', ' ')})"
 
             if matched:
                 if p_num not in found_pages:
@@ -119,7 +124,10 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
                 if v.contenido_decodificado and (is_qr and v.clasificacion_semantica == "codigo_qr"):
                     decoded_notes.append(f"contenido/URL: {v.contenido_decodificado}")
         extra_note = f" ({', '.join(decoded_notes)})" if decoded_notes else ""
-        descripcion = f"Sí, el documento cuenta con {item_type} verificado e inventariado en {citas_str}{extra_note}."
+        if is_general_image:
+            descripcion = f"Sí, el documento cuenta con imágenes y elementos visuales registrados en {citas_str}{extra_note}."
+        else:
+            descripcion = f"Sí, el documento cuenta con {item_type} verificado e inventariado en {citas_str}{extra_note}."
 
     return citas, evidencias, descripcion
 
@@ -164,14 +172,23 @@ def process_chat_query(
         resultados_paginas = fallback_job.resultados_por_pagina
         total_pages = fallback_job.paginas_totales or len(resultados_paginas) or 1
 
-    # 2. Inspeccionar elementos visuales (códigos de barras, QR, firmas, sellos, fotos)
-    vis_citas, vis_evidencias, vis_desc = _search_visual_elements(resultados_paginas, q_norm)
-    if vis_citas:
-        return ChatOutput(
-            respuesta=vis_desc,
-            citas=vis_citas,
-            evidencias_relacionadas=vis_evidencias[:3],
+    # 2. Inspeccionar elementos visuales (preguntas de presencia: códigos de barras, QR, firmas, sellos, fotos, diagramas)
+    is_content_query = any(
+        kw in q_norm for kw in (
+            "de que trata", "de qué trata", "que trata", "qué trata",
+            "que contiene", "qué contiene", "que muestra", "qué muestra",
+            "que dice", "qué dice", "explica", "explicar", "describ",
+            "cual es el", "cuál es el", "que representa", "qué representa", "contenido"
         )
+    )
+    if not is_content_query:
+        vis_citas, vis_evidencias, vis_desc = _search_visual_elements(resultados_paginas, q_norm)
+        if vis_citas:
+            return ChatOutput(
+                respuesta=vis_desc,
+                citas=vis_citas,
+                evidencias_relacionadas=vis_evidencias[:3],
+            )
 
     # 3. Inspeccionar índice asociativo y hallazgos estructurados de L1 o fallback
     matched_evidences: List[Evidence] = []
@@ -272,7 +289,12 @@ def process_chat_query(
     if not matched_evidences and text_evidences:
         matched_evidences.extend(text_evidences)
 
-    # 4. Modo conversacional con LLM multimodal/texto completo (Gemini 2.5/3.1 Flash Lite o Local)
+    # 4a. Búsqueda determinista ultrarrápida (<5ms) en Markdown indexado por páginas
+    det_out = deterministic_search(pdf_hash, pregunta, resultados_paginas)
+    if det_out is not None:
+        return det_out
+
+    # 4b. Modo conversacional con LLM multimodal/texto completo (Gemini 3.1 Flash Lite con conmutación de claves)
     from app.services.providers import get_llm_provider
     llm_provider = get_llm_provider()
 

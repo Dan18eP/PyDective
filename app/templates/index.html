@@ -23,9 +23,9 @@
             <form id="upload-form" class="upload-form" onsubmit="event.preventDefault(); submitJob();">
                 <!-- Dropzone Area -->
                 <div class="form-group">
-                    <label class="form-label" for="pdf-file-input">Documento PDF (hasta 20 páginas)</label>
+                    <label class="form-label" for="pdf-file-input">Documento o Evidencia (PDF, Imágenes, DOCX, XLSX, TXT)</label>
                     <div id="dropzone-area" class="dropzone">
-                        <input type="file" id="pdf-file-input" name="file" accept="application/pdf" class="file-input" required>
+                        <input type="file" id="pdf-file-input" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.docx,.xlsx,.txt,application/pdf,image/*" class="file-input" required>
                         <div class="dropzone-inner" id="dropzone-prompt">
                             <div class="dropzone-icon">
                                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -34,8 +34,8 @@
                                     <line x1="12" y1="3" x2="12" y2="15"></line>
                                 </svg>
                             </div>
-                            <span class="dropzone-title">Arrastra tu archivo PDF aquí o haz clic para examinar</span>
-                            <span class="dropzone-hint">Límite estricto: hasta 20 páginas • PDF nativo o escaneado</span>
+                            <span class="dropzone-title">Arrastra tu archivo aquí o haz clic para examinar</span>
+                            <span class="dropzone-hint">Formatos: PDF, PNG, JPG, TIFF, DOCX, XLSX, TXT • Hasta 20 páginas</span>
                         </div>
                         <div class="file-info-preview hidden" id="file-preview">
                             <div class="file-preview-icon">

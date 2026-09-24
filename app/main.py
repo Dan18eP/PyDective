@@ -428,7 +428,7 @@ async def procesar_documento(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    save_uploaded_pdf(pdf_hash, pdf_bytes)
+    save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
 
     # 3. Consulta temprana de Caché L0 instantánea (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
@@ -646,7 +646,7 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    save_uploaded_pdf(pdf_hash, pdf_bytes)
+    save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
 
     # 3. Consulta temprana L0 en streaming (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)

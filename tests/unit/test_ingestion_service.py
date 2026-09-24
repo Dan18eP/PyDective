@@ -37,10 +37,30 @@ def test_rejects_empty_file():
     assert exc_info.value.code == "INVALID_PDF"
 
 
-def test_rejects_non_pdf_extension():
+def test_rejects_unsupported_extension():
     with pytest.raises(DocumentoInvalidoError) as exc_info:
-        validate_and_read_pdf(b"%PDF-1.4\n...", filename="documento.docx")
+        validate_and_read_pdf(b"binary_payload", filename="malicioso.exe")
     assert exc_info.value.code == "INVALID_PDF"
+
+
+def test_accepts_valid_image_formats():
+    from PIL import Image
+    import io
+    img = Image.new("RGB", (200, 200), color="blue")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    h, doc, pages = validate_and_read_pdf(buf.getvalue(), filename="factura.png")
+    assert pages == 1
+    assert len(h) == 64
+    doc.close()
+
+
+def test_accepts_valid_txt_file():
+    txt_bytes = b"DOCUMENTO DE PRUEBA EN TEXTO PLANO\nTotal: $1.200.000 COP\n"
+    h, doc, pages = validate_and_read_pdf(txt_bytes, filename="informe.txt")
+    assert pages == 1
+    assert "DOCUMENTO" in doc[0].get_text()
+    doc.close()
 
 
 def test_rejects_file_missing_pdf_magic_header():

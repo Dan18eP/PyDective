@@ -34,8 +34,8 @@ def test_resultados_page_renders_html():
     assert sample_hash in response.text
 
 
-def test_procesar_rejects_non_pdf():
-    files = {"file": ("test.txt", b"not a pdf content", "text/plain")}
+def test_procesar_rejects_unsupported_format():
+    files = {"file": ("malicious.exe", b"not a supported content", "application/octet-stream")}
     data = {"parametros": '["total"]'}
     response = client.post("/procesar", files=files, data=data)
     assert response.status_code == 400

@@ -53,7 +53,7 @@ def _convert_docx_to_pdf_in_memory(docx_bytes: bytes) -> bytes:
         check_new_page(line_height + 4)
         is_heading = p.style.name.startswith("Heading") if p.style else False
         fsize = 13.0 if is_heading else 9.5
-        page.insert_text(pymupdf.Point(margin_x, y_cursor), txt[:110], fontsize=fsize, fontname="helv", encoding=pymupdf.TEXT_ENCODING_LATIN)
+        page.insert_text(pymupdf.Point(margin_x, y_cursor), txt[:140], fontsize=fsize, fontname="helv")
         y_cursor += line_height + (4 if is_heading else 1)
 
     for table in doc_in.tables:
@@ -62,10 +62,10 @@ def _convert_docx_to_pdf_in_memory(docx_bytes: bytes) -> bytes:
             check_new_page(line_height + 4)
             row_txt = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
             if row_txt:
-                page.insert_text(pymupdf.Point(margin_x + 10, y_cursor), row_txt[:100], fontsize=9.0, fontname="helv", encoding=pymupdf.TEXT_ENCODING_LATIN)
+                page.insert_text(pymupdf.Point(margin_x + 10, y_cursor), row_txt[:120], fontsize=9.0, fontname="helv")
                 y_cursor += line_height + 2
 
-    res_bytes = pdf_doc.convert_to_pdf()
+    res_bytes = pdf_doc.tobytes()
     pdf_doc.close()
     return res_bytes
 
@@ -79,7 +79,7 @@ def _convert_xlsx_to_pdf_in_memory(xlsx_bytes: bytes) -> bytes:
 
     margin_x = 40.0
     y_cursor = 50.0
-    line_height = 13.0
+    line_height = 14.0
 
     def check_new_page(needed_height=20.0):
         nonlocal page, y_cursor
@@ -90,18 +90,22 @@ def _convert_xlsx_to_pdf_in_memory(xlsx_bytes: bytes) -> bytes:
     for sheet_name in wb.sheetnames[:3]:
         sheet = wb[sheet_name]
         check_new_page(25.0)
-        page.insert_text(pymupdf.Point(margin_x, y_cursor), f"HOJA: {sheet_name.upper()}", fontsize=11.0, fontname="helv", encoding=pymupdf.TEXT_ENCODING_LATIN)
+        page.insert_text(pymupdf.Point(margin_x, y_cursor), f"HOJA: {sheet_name.upper()}", fontsize=11.0, fontname="helv")
         y_cursor += line_height + 4
 
         for row in sheet.iter_rows(values_only=True):
             vals = [str(v).strip() for v in row if v is not None and str(v).strip()]
             if vals:
                 check_new_page(line_height + 2)
-                row_str = "  |  ".join(vals)
-                page.insert_text(pymupdf.Point(margin_x, y_cursor), row_str[:130], fontsize=8.5, fontname="helv", encoding=pymupdf.TEXT_ENCODING_LATIN)
+                if len(vals) == 2:
+                    k = vals[0] if vals[0].endswith(":") else f"{vals[0]}:"
+                    row_str = f"{k} {vals[1]}"
+                else:
+                    row_str = "    ".join(vals)
+                page.insert_text(pymupdf.Point(margin_x, y_cursor), row_str[:160], fontsize=9.0, fontname="helv")
                 y_cursor += line_height
 
-    res_bytes = pdf_doc.convert_to_pdf()
+    res_bytes = pdf_doc.tobytes()
     pdf_doc.close()
     return res_bytes
 
@@ -121,10 +125,10 @@ def _convert_txt_to_pdf_in_memory(txt_bytes: bytes) -> bytes:
         if y_cursor + line_height > 790.0:
             page = pdf_doc.new_page(width=595, height=842)
             y_cursor = 50.0
-        page.insert_text(pymupdf.Point(margin_x, y_cursor), line[:110], fontsize=9.5, fontname="helv", encoding=pymupdf.TEXT_ENCODING_LATIN)
+        page.insert_text(pymupdf.Point(margin_x, y_cursor), line[:130], fontsize=9.5, fontname="helv")
         y_cursor += line_height
 
-    res_bytes = pdf_doc.convert_to_pdf()
+    res_bytes = pdf_doc.tobytes()
     pdf_doc.close()
     return res_bytes
 

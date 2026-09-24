@@ -516,8 +516,7 @@ def extract_spatial_key_values(
                         val_text = ""
 
                     if val_text:
-                        if val_text.startswith(":"):
-                            val_text = val_text[1:].strip()
+                        val_text = val_text.lstrip("|:·• \t")
                         if "·" in val_text:
                             val_text = val_text.split("·")[0].strip()
                         if "|" in val_text:
@@ -554,9 +553,9 @@ def extract_spatial_key_values(
 
                         # Si buscamos NIT, delimitar estrictamente al patrón numérico
                         if any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion")):
-                            nit_m = re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)
+                            nit_m = re.search(r"(\d[\d\.\s]*-\s*\d|\b\d{7,10}\b)", val_text)
                             if nit_m:
-                                val_text = nit_m.group(0)
+                                val_text = nit_m.group(0).strip()
 
                         # Si buscamos moneda/total, extraer quirúrgicamente la cifra monetaria si está mezclada
                         if any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto")):
@@ -667,8 +666,7 @@ def extract_spatial_key_values(
                             val_text = ""
 
                         if val_text:
-                            if val_text.startswith(":"):
-                                val_text = val_text[1:].strip()
+                            val_text = val_text.lstrip("|:·• \t")
                             if "·" in val_text:
                                 val_text = val_text.split("·")[0].strip()
                             if "|" in val_text:

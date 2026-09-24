@@ -89,19 +89,26 @@ def run_audit():
             # Extracción espacial directa (carril nativo)
             params = list(gt.keys())
             findings = extract_spatial_key_values(page, params)
-            found_map = {f.parametro: f.valor for f in findings}
+            found_map = {f.parametro: f for f in findings}
 
             raw_text = page.get_text()
 
             for p_name, exp_val in gt.items():
                 total_fields += 1
-                got = found_map.get(p_name)
+                f_obj = found_map.get(p_name)
                 is_hit = False
 
-                if got:
+                if f_obj:
+                    got_val = str(f_obj.valor)
+                    got_norm = str(f_obj.valor_normalizado or "")
                     norm_exp = normalize_parameter(exp_val)
-                    norm_got = normalize_parameter(got)
-                    if exp_val.lower() in got.lower() or norm_exp in norm_got:
+                    norm_got = normalize_parameter(got_val)
+                    if (
+                        exp_val.lower() in got_val.lower()
+                        or exp_val.lower() in got_norm.lower()
+                        or norm_exp in norm_got
+                        or norm_exp in normalize_parameter(got_norm)
+                    ):
                         is_hit = True
 
                 if is_hit:

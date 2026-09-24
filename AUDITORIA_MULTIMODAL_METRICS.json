@@ -6,7 +6,7 @@
     },
     "accuracy": "0/30 (0.0%)",
     "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 10.6,
+    "avg_latency_ms": 10.62,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -68,7 +68,7 @@
     },
     "accuracy": "0/30 (0.0%)",
     "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 26.83,
+    "avg_latency_ms": 30.43,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -130,7 +130,7 @@
     },
     "accuracy": "0/30 (0.0%)",
     "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 12.18,
+    "avg_latency_ms": 11.78,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -192,7 +192,7 @@
     },
     "accuracy": "0/15 (0.0%)",
     "visual_accuracy": "0/5 (0.0%)",
-    "avg_latency_ms": 28.08,
+    "avg_latency_ms": 28.87,
     "encoding_issues_count": 5,
     "encoding_issues": [
       [
@@ -227,110 +227,32 @@
     "classification_distribution": {
       "local": 5
     },
-    "accuracy": "0/15 (0.0%)",
+    "accuracy": "15/15 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 35.48,
-    "encoding_issues_count": 5,
-    "encoding_issues": [
-      [
-        "doc_091_balance.xlsx",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_092_balance.xlsx",
-        "nit",
-        "900543210-8"
-      ],
-      [
-        "doc_093_balance.xlsx",
-        "nit",
-        "830123987-1"
-      ],
-      [
-        "doc_094_balance.xlsx",
-        "nit",
-        "890900123-5"
-      ],
-      [
-        "doc_095_balance.xlsx",
-        "nit",
-        "900876543-2"
-      ]
-    ]
+    "avg_latency_ms": 34.57,
+    "encoding_issues_count": 0,
+    "encoding_issues": []
   },
   "ofimatico_docx": {
     "total_files": 5,
     "classification_distribution": {
       "local": 5
     },
-    "accuracy": "7/20 (35.0%)",
+    "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 31.75,
-    "encoding_issues_count": 5,
-    "encoding_issues": [
-      [
-        "doc_086_contrato.docx",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_087_contrato.docx",
-        "representante legal",
-        "CARLOS EDUARDO RESTREPO MEJÍA"
-      ],
-      [
-        "doc_088_contrato.docx",
-        "representante legal",
-        "MARÍA CONSUELO GÓMEZ ÁLVAREZ"
-      ],
-      [
-        "doc_089_contrato.docx",
-        "nit",
-        "890900123-5"
-      ],
-      [
-        "doc_090_contrato.docx",
-        "representante legal",
-        "DIANA PATRICIA CÁRDENAS BOTERO"
-      ]
-    ]
+    "avg_latency_ms": 28.7,
+    "encoding_issues_count": 0,
+    "encoding_issues": []
   },
   "ofimatico_txt": {
     "total_files": 5,
     "classification_distribution": {
       "local": 5
     },
-    "accuracy": "8/20 (40.0%)",
+    "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 7.94,
-    "encoding_issues_count": 5,
-    "encoding_issues": [
-      [
-        "doc_096_extracto.txt",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_097_extracto.txt",
-        "nit",
-        "900543210-8"
-      ],
-      [
-        "doc_098_extracto.txt",
-        "nit",
-        "830123987-1"
-      ],
-      [
-        "doc_099_extracto.txt",
-        "nit",
-        "890900123-5"
-      ],
-      [
-        "doc_100_extracto.txt",
-        "nit",
-        "900876543-2"
-      ]
-    ]
+    "avg_latency_ms": 5.69,
+    "encoding_issues_count": 0,
+    "encoding_issues": []
   }
 }

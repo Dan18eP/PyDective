@@ -239,8 +239,8 @@
 .pdf-search-match-box {
     position: absolute;
     background: rgba(255, 235, 59, 0.45);
-    border: 1px solid rgba(253, 216, 53, 0.95);
-    border-radius: 2px;
+    border: 1.5px solid rgba(253, 216, 53, 0.95);
+    border-radius: 3px;
     pointer-events: auto;
     cursor: pointer;
     transition: background 0.15s ease, transform 0.15s ease;
@@ -248,59 +248,88 @@
 }
 
 .pdf-search-match-box:hover {
-    background: rgba(255, 214, 0, 0.65);
+    background: rgba(255, 214, 0, 0.75);
+    box-shadow: 0 0 8px rgba(255, 214, 0, 0.6);
 }
 
-.pdf-search-match-active {
-    background: rgba(255, 112, 67, 0.75) !important;
-    border: 2px solid #ff5722 !important;
-    box-shadow: 0 0 12px rgba(255, 87, 34, 0.85) !important;
-    z-index: 25 !important;
-    transform: scale(1.04);
+.pdf-search-match-active,
+.pdf-search-match-box.active {
+    background: rgba(255, 87, 34, 0.85) !important;
+    border: 2.5px solid #ff3d00 !important;
+    box-shadow: 0 0 16px rgba(255, 61, 0, 0.9), 0 0 32px rgba(255, 112, 67, 0.6) !important;
+    z-index: 30 !important;
+    transform: scale(1.05);
+    animation: pydective-match-pulse 1.2s infinite alternate ease-in-out;
+}
+
+@keyframes pydective-match-pulse {
+    0% {
+        box-shadow: 0 0 10px rgba(255, 61, 0, 0.7);
+    }
+    100% {
+        box-shadow: 0 0 24px rgba(255, 61, 0, 1), 0 0 40px rgba(255, 145, 0, 0.8);
+    }
+}
+
+.pdf-match-pin {
+    position: absolute;
+    top: -24px;
+    left: 0;
+    background: linear-gradient(135deg, #ff3d00, #ff9100);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6), 0 0 8px rgba(255, 61, 0, 0.5);
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    z-index: 32;
 }
 
 /* Visual Grounding Target (Bounding Box animado para citas y hallazgos) */
 .pdf-grounding-target {
     position: absolute;
-    border: 2.5px solid #00f2fe;
-    background: rgba(0, 242, 254, 0.18);
-    box-shadow: 0 0 20px rgba(0, 242, 254, 0.6);
+    border: 3px solid #00f2fe;
+    background: rgba(0, 242, 254, 0.25);
+    box-shadow: 0 0 25px rgba(0, 242, 254, 0.9), inset 0 0 15px rgba(0, 242, 254, 0.4);
     border-radius: 4px;
     z-index: 35;
     pointer-events: auto;
-    animation: pydective-grounding-pulse 1.8s infinite ease-in-out;
+    animation: pydective-grounding-pulse 1.4s infinite alternate ease-in-out;
 }
 
 @keyframes pydective-grounding-pulse {
     0% {
         border-color: #00f2fe;
-        box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
-    }
-    50% {
-        border-color: #38bdf8;
-        box-shadow: 0 0 24px rgba(56, 189, 248, 0.85);
-        background: rgba(0, 242, 254, 0.28);
+        box-shadow: 0 0 14px rgba(0, 242, 254, 0.7);
+        transform: scale(1.0);
     }
     100% {
-        border-color: #00f2fe;
-        box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+        border-color: #38bdf8;
+        box-shadow: 0 0 35px rgba(56, 189, 248, 1), 0 0 50px rgba(0, 242, 254, 0.75);
+        background: rgba(0, 242, 254, 0.38);
+        transform: scale(1.03);
     }
 }
 
 .pdf-grounding-label {
     position: absolute;
-    top: -24px;
+    top: -26px;
     left: -2px;
-    background: #00f2fe;
+    background: linear-gradient(135deg, #00f2fe, #0284c7);
     color: #05080f;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 0.15rem 0.45rem;
-    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
     white-space: nowrap;
     text-transform: uppercase;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-    letter-spacing: 0.03em;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 0 10px rgba(0, 242, 254, 0.7);
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    z-index: 38;
 }
 
 /* Loading & Empty States */

@@ -30,7 +30,7 @@ class PydectivePdfViewer {
         this.pdfDoc = null;
         this.totalPages = 0;
         this.currentPage = 1;
-        this.scale = 1.25;
+        this.scale = 1.45;
         this.pageRenders = {}; // pageNum -> { canvas, overlay, viewport, pageObj }
         this.matches = [];
         this.currentMatchIndex = -1;
@@ -127,6 +127,11 @@ class PydectivePdfViewer {
             this.container.innerHTML = '';
             await this.renderAllPages();
             this.updateCurrentPageUI(1);
+
+            // Ajustar al ancho del contenedor para máxima legibilidad
+            setTimeout(() => {
+                this.fitWidth();
+            }, 100);
         } catch (err) {
             console.error('[PyDective Viewer] Error cargando PDF:', err);
             this.container.innerHTML = `
@@ -286,11 +291,22 @@ class PydectivePdfViewer {
     focusCurrentMatch() {
         if (this.currentMatchIndex < 0 || this.currentMatchIndex >= this.matches.length) return;
 
-        // Actualizar clases activas
-        document.querySelectorAll('.pdf-search-match-box.active').forEach(el => el.classList.remove('active'));
+        // Actualizar clases activas y remover badges anteriores de búsqueda
+        document.querySelectorAll('.pdf-search-match-box.active').forEach(el => {
+            el.classList.remove('active');
+            const pin = el.querySelector('.pdf-match-pin');
+            if (pin) pin.remove();
+        });
+
         const activeBox = document.getElementById(`match-box-${this.currentMatchIndex}`);
         if (activeBox) {
             activeBox.classList.add('active');
+
+            // Añadir pin flotante fluorescente indicando el número de coincidencia
+            const pin = document.createElement('span');
+            pin.className = 'pdf-match-pin';
+            pin.innerText = `🔍 ${this.currentMatchIndex + 1}/${this.matches.length}`;
+            activeBox.appendChild(pin);
         }
 
         this.updateSearchCounterUI();

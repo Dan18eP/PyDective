@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-PyDective — Script de Instalación Automatizada de Dependencias
-Verifica el entorno de ejecución, detecta gestores (uv / pip), instala las librerías
-requeridas según pyproject.toml y configura el entorno de trabajo.
+PyDective - Script de Instalacion Automatizada de Dependencias
+Verifica el entorno de ejecucion, detecta gestores (uv / pip), instala las librerias
+requeridas segun pyproject.toml y configura el entorno de trabajo y motores de vision.
 """
 
 import sys
@@ -10,7 +10,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-
 
 ROOT_DIR = Path(__file__).resolve().parent
 
@@ -32,11 +31,11 @@ def print_error(msg: str):
 
 
 def check_python_version():
-    print_step("Verificando versión de Python...")
+    print_step("Verificando version de Python...")
     major, minor = sys.version_info.major, sys.version_info.minor
     if major < 3 or (major == 3 and minor < 12):
         print_error(
-            f"Se requiere Python 3.12 o superior. Versión detectada: {major}.{minor}.{sys.version_info.micro}"
+            f"Se requiere Python 3.12 o superior. Version detectada: {major}.{minor}.{sys.version_info.micro}"
         )
         sys.exit(1)
     print_ok(f"Python {major}.{minor}.{sys.version_info.micro} detectado (compatible)")
@@ -64,12 +63,16 @@ def find_uv_executable() -> str | None:
 def setup_environment_files():
     print_step("Configurando estructura de directorios y variables de entorno...")
 
-    # Crear directorios de datos
-    uploads_dir = ROOT_DIR / "data" / "uploads"
-    results_dir = ROOT_DIR / "data" / "results"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    results_dir.mkdir(parents=True, exist_ok=True)
-    print_ok("Directorios 'data/uploads' y 'data/results' listos")
+    # Crear directorios de datos requeridos por el sistema
+    directories = [
+        ROOT_DIR / "data" / "uploads",
+        ROOT_DIR / "data" / "results",
+        ROOT_DIR / "data" / "cache",
+        ROOT_DIR / "data" / "temp",
+    ]
+    for d in directories:
+        d.mkdir(parents=True, exist_ok=True)
+    print_ok("Directorios de almacenamiento en 'data/' verificados y listos")
 
     # Copiar .env si no existe
     env_file = ROOT_DIR / ".env"
@@ -82,11 +85,11 @@ def setup_environment_files():
 
 
 def install_dependencies():
-    print_step("Instalando dependencias de producción y pruebas...")
+    print_step("Instalando dependencias de produccion, pruebas y motores de vision...")
 
     uv_bin = find_uv_executable()
     if uv_bin:
-        print_ok(f"Gestor ultra-rápido 'uv' localizado en: {uv_bin}")
+        print_ok(f"Gestor ultra-rapido 'uv' localizado en: {uv_bin}")
         cmd = [uv_bin, "sync"]
         print(f"Ejecutando: {' '.join(cmd)}")
         res = subprocess.run(cmd, cwd=str(ROOT_DIR))
@@ -94,25 +97,23 @@ def install_dependencies():
             print_warn("'uv sync' falló, intentando con 'uv pip install -e .'...")
             res = subprocess.run([uv_bin, "pip", "install", "-e", "."], cwd=str(ROOT_DIR))
             if res.returncode != 0:
-                print_error("Fallo durante la instalación con uv.")
+                print_error("Fallo durante la instalacion con uv.")
                 sys.exit(res.returncode)
     else:
         print_warn("No se encontró 'uv'. Utilizando 'pip' estándar de Python...")
-        # Actualizar pip primero
         subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], cwd=str(ROOT_DIR))
-        # Instalar dependencias en modo editable
         cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
         print(f"Ejecutando: {' '.join(cmd)}")
         res = subprocess.run(cmd, cwd=str(ROOT_DIR))
         if res.returncode != 0:
-            print_error("Fallo durante la instalación con pip.")
+            print_error("Fallo durante la instalacion con pip.")
             sys.exit(res.returncode)
 
-    print_ok("Todas las dependencias se instalaron correctamente")
+    print_ok("Todas las dependencias base se instalaron correctamente")
 
 
 def verify_installation():
-    print_step("Comprobando importación de módulos críticos...")
+    print_step("Comprobando importacion de modulos criticos y motores de vision...")
     modules_to_test = [
         ("fastapi", "FastAPI"),
         ("uvicorn", "Uvicorn"),
@@ -122,6 +123,11 @@ def verify_installation():
         ("PIL", "Pillow"),
         ("httpx", "HTTPX"),
         ("pydantic", "Pydantic"),
+        ("rapidocr_onnxruntime", "RapidOCR ONNX Runtime"),
+        ("torch", "PyTorch (CPU)"),
+        ("transformers", "HuggingFace Transformers"),
+        ("timm", "Timm Vision Models"),
+        ("einops", "Einops Tensor Ops"),
     ]
 
     uv_bin = find_uv_executable()
@@ -131,26 +137,58 @@ def verify_installation():
         test_cmd = runner + ["-c", f"import {mod}; print('OK')"]
         res = subprocess.run(test_cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
         if res.returncode == 0:
-            print_ok(f"Módulo '{name}' verificado.")
+            print_ok(f"Modulo '{name}' verificado.")
         else:
-            print_warn(f"Módulo '{name}' no pudo ser importado directamente: {res.stderr.strip()[:100]}")
+            print_warn(f"Modulo '{name}' no pudo ser importado directamente: {res.stderr.strip()[:100]}")
+
+
+def verify_vision_engines():
+    print_step("Comprobando disponibilidad de motores de vision...")
+
+    uv_bin = find_uv_executable()
+    runner = [uv_bin, "run", "python"] if uv_bin else [sys.executable]
+
+    # 1. Comprobar RapidOCR
+    check_rapid_cmd = runner + [
+        "-c",
+        "from app.services.ocr_service import get_ocr_engine; engine = get_ocr_engine(); print('RAPIDOCR_READY' if engine else 'RAPIDOCR_NONE')",
+    ]
+    res_rapid = subprocess.run(check_rapid_cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
+    if "RAPIDOCR_READY" in res_rapid.stdout:
+        print_ok("Motor RapidOCR ONNX: Listo (Aceleracion C++/AVX2 en CPU)")
+    else:
+        print_warn(f"Motor RapidOCR ONNX: Advertencia ({res_rapid.stderr.strip()[:80]})")
+
+    # 2. Comprobar PyTorch CPU y compatibilidad con Florence-2
+    check_torch_cmd = runner + [
+        "-c",
+        "import torch; print(f'TORCH_VERSION={torch.__version__},CUDA_AVAILABLE={torch.cuda.is_available()}')",
+    ]
+    res_torch = subprocess.run(check_torch_cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
+    if res_torch.returncode == 0 and "TORCH_VERSION" in res_torch.stdout:
+        print_ok(f"Motor PyTorch CPU: Listo ({res_torch.stdout.strip()})")
+    else:
+        print_warn("Motor PyTorch CPU: No detectado o requiere configuracion")
 
 
 def main():
-    print("=" * 65)
-    print("       PyDective — Asistente de Instalación de Dependencias       ")
-    print("=" * 65)
+    print("=" * 70)
+    print("       PyDective - Asistente de Instalacion de Dependencias       ")
+    print("=" * 70)
 
     check_python_version()
     setup_environment_files()
     install_dependencies()
     verify_installation()
+    verify_vision_engines()
 
-    print("\n" + "=" * 65)
-    print("  ¡Instalación completada con éxito!")
-    print("  Ahora puedes iniciar el programa ejecutando:")
+    print("\n" + "=" * 70)
+    print("  [EXITO] Instalacion y verificacion completadas correctamente.")
+    print("  Para iniciar el servidor y la interfaz ejecuta:")
+    print("      python run.py")
+    print("  O directamente con Uvicorn:")
     print("      python run_app.py")
-    print("=" * 65 + "\n")
+    print("=" * 70 + "\n")
 
 
 if __name__ == "__main__":

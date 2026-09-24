@@ -65,5 +65,5 @@ data/results/*.json
 data/uploads/*.pdf
 !data/uploads/.gitkeep
 
-
-
+# 100 multi-format test fixtures suite
+tests/fixtures_100/

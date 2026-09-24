@@ -22,6 +22,7 @@ class L1DocumentEntry(BaseModel):
     hallazgos_previos: List[HallazgoEnriquecido] = Field(default_factory=list)
     telemetria_original: Optional[TelemetriaDesagregada] = None
     documento_markdown_indexado: Optional[str] = None
+    resumen_ejecutivo: Optional[Dict[str, Any]] = None
     timestamp: float = Field(default_factory=time.time)
 
 

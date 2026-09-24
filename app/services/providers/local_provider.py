@@ -50,6 +50,8 @@ class LocalLLMProvider(BaseLLMProvider):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.2,
+        image_bytes: Optional[bytes] = None,
+        image_path: Optional[str] = None,
     ) -> Optional[str]:
         messages: List[Dict[str, str]] = []
         if system_instruction:

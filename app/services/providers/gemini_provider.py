@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 
 try:
@@ -34,6 +35,8 @@ class GeminiProvider(BaseLLMProvider):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.2,
+        image_bytes: Optional[bytes] = None,
+        image_path: Optional[str] = None,
     ) -> Optional[str]:
         if not self.is_available():
             return None
@@ -49,6 +52,19 @@ class GeminiProvider(BaseLLMProvider):
                 )
 
             contents = [prompt]
+
+            # Inyectar imagen si está disponible para razonamiento multimodal directo
+            if types is not None:
+                if image_bytes:
+                    contents.append(
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/png")
+                    )
+                elif image_path and os.path.exists(image_path):
+                    with open(image_path, "rb") as f:
+                        contents.append(
+                            types.Part.from_bytes(data=f.read(), mime_type="image/png")
+                        )
+
             kwargs = {"model": self.model_name, "contents": contents}
             if config:
                 kwargs["config"] = config
@@ -60,3 +76,4 @@ class GeminiProvider(BaseLLMProvider):
         except Exception as exc:
             logger.warning(f"Error generando respuesta con GeminiProvider: {exc}")
             return None
+

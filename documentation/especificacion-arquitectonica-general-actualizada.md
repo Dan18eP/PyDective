@@ -694,6 +694,7 @@ Fuera de alcance:
 10. Plantillas finales y refinamiento de UX.
 11. Motores locales de visión (RapidOCR / Florence-2) y benchmark simultáneo (ADR-006).
 12. Portabilidad universal multiplataforma Linux/Windows y scripts de ciclo de vida (ADR-007).
+13. Proveedores CLI multimodales (agy/opencode), interoperabilidad OpenAI, resúmenes textuales y Markdown (ADR-008).
 
 ---
 
@@ -711,3 +712,25 @@ Para garantizar la viabilidad del sistema en despliegues con recursos contenidos
 El ciclo de vida del servicio local Ollama (`ollama serve`) se gobierna con aislamiento formal:
 - **En Windows:** `creationflags=subprocess.CREATE_NEW_PROCESS_GROUP` para independizar la consola y gestionar señales de interrupción de forma controlada.
 - **En Linux / POSIX:** `start_new_session=True` para desacoplar el grupo de procesos (SID/PGID) y permitir una terminación limpia mediante `SIGTERM` sin dejar procesos zombis en el sistema.
+
+---
+
+## 17. Proveedores CLI Multimodales, Interoperabilidad OpenAI y Renderizado Markdown (ADR-008)
+
+### 17.1 Ejecución Headless y Aislamiento de Procesos CLI
+- **AgyCLIProvider (`agy`):** Ejecuta con `--dangerously-skip-permissions` y `--disable-slash-commands`, permitiendo que el motor *jetski* lea imágenes y texto en segundo plano sin bloquearse esperando confirmaciones interactivas.
+- **OpenCodeCLIProvider (`opencode`):** Emplea la sintaxis moderna `opencode run "<prompt>"`, filtrando banners y caracteres de control de terminal.
+- **Directorio de Ejecución Aislado:** Ambos ejecutables corren bajo `cwd=tempfile.gettempdir()` con `stdin=subprocess.DEVNULL`, eliminando la indexación recursiva de git y reduciendo el tiempo de inferencia de 40s a 5–7s.
+
+### 17.2 Endpoints de Compatibilidad OpenAI
+- `GET /v1/models` y `POST /v1/chat/completions` en `app/main.py` proporcionan interoperabilidad con clientes OpenAI, IDEs y herramientas de asistencia sin errores 404.
+
+### 17.3 Comprensión de Texto, Resúmenes de Capítulos y Enrutamiento Estricto
+- Lectura de texto nativo con PyMuPDF y extracción OCR de diagramas mediante `RapidOCR`.
+- Mapeo de consultas de capítulos (`capitulo 2` $\rightarrow$ Folio 4) y derivación no determinista obligatoria hacia el LLM seleccionado cuando se consulta por resúmenes o lecturas abiertas.
+
+### 17.4 Renderizado Enriquecido de Markdown en Frontend
+- Integración de `marked.min.js` en formato local estático (`app/static/js/marked.min.js`).
+- Conversión de respuestas en HTML enriquecido con soporte GFM, tablas, viñetas, negritas y bloques de código.
+- Transformación automática de citas textuales `[Página X]` en pastillas interactivas (`.inline-page-tag`) que navegan directamente a la página en el visor PDF.
+

@@ -152,8 +152,13 @@ Pymes y equipos administrativos que trabajan con facturas, soportes contables, c
 - **Modo Benchmark Simultáneo:** Capacidad de ejecutar ambos motores concurrentemente en paralelo para evaluar latencia y exactitud en vivo.
 - **Ingesta Universal Multi-Formato:** Soporte nativo para imágenes rasterizadas (PNG, JPG, TIFF) y formatos ofimáticos (DOCX, XLSX, TXT) convertidos en memoria a PDF.
 - **Inyección de Capa OCR Invisible (`render_mode=3`):** Los documentos escaneados adquieren una capa de texto invisible que permite seleccionarlos y buscarlos como PDFs digitales en el visor.
-- **Arquitectura Multi-Proveedor Desacoplada:** Posibilidad de operar en la nube (Google Gemini) o 100% desconectado con modelos locales LLM vía Ollama (Qwen2.5:3b).
-- **Módulo Pydective Chat:** Interfaz conversacional conectada a L1/L2 para interrogar al PDF con citas obligatorias de página.
+- **Arquitectura Multi-Proveedor Desacoplada y Soporte CLI:** Operación en la nube (Google Gemini), local offline vía Ollama (Qwen2.5:3b) y ejecución directa de CLI de vanguardia (**Antigravity CLI `agy`** con `--dangerously-skip-permissions` y **OpenCode CLI `opencode run`**) en directorios temporales aislados.
+- **Endpoints de Interoperabilidad OpenAI:** Rutas compatibles `GET /v1/models` y `POST /v1/chat/completions` para integrar extensiones de IDE y agentes autónomos sin errores 404.
+- **Módulo Pydective Chat y Resúmenes Textuales:**
+  - Interfaz conversacional conectada a L1/L2 para interrogar al PDF con citas obligatorias de página.
+  - Lectura integral de folios con PyMuPDF y OCR complementario (`RapidOCR`) para diagramas y esquemas visuales.
+  - Detección autónoma de capítulos y resúmenes ejecutivos no deterministas cuando el usuario selecciona un motor explícito de IA.
+  - **Renderizado de Markdown Enriquecido:** Formateo dinámico con `marked.js` local (encabezados, negritas, viñetas, tablas, citas en bloque y bloques de código) y citas textuales `[Página X]` convertidas en pastillas interactivas que saltan al visor con un clic.
 - **Visor de PDF interactivo con buscador de texto exacto estilo Chrome (`Ctrl+F`):**
   - Renderizado de alta fidelidad del PDF en la interfaz mediante PDF.js.
   - Buscador de texto exacto con contador dinámico ($N$ de $M$), botones anterior/siguiente y atajos de teclado (`Enter`, `Shift+Enter`).

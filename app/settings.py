@@ -30,10 +30,22 @@ class Settings(BaseSettings):
         description="Single Google Gemini API key"
     )
 
-    # Provider Architecture (Cloud vs Local LLM)
+    # Provider Architecture (Cloud, CLI & Local LLM)
     LLM_PROVIDER: str = Field(
-        default="auto",
-        description="LLM Provider to use: 'auto', 'gemini', or 'local'"
+        default="chain",
+        description="LLM Provider to use: 'chain' (agy -> opencode -> gemini), 'agy', 'opencode', 'gemini', 'local', or 'auto'"
+    )
+    AGY_BIN_PATH: str = Field(
+        default="/snap/antigravity-cli/22/bin/agy",
+        description="Path or binary name for AGY CLI"
+    )
+    OPENCODE_BIN_PATH: str = Field(
+        default="opencode",
+        description="Path or binary name for OpenCode CLI"
+    )
+    CLI_SUBPROCESS_TIMEOUT_SECONDS: float = Field(
+        default=65.0,
+        description="Timeout in seconds for terminal CLI commands (AGY / OpenCode)"
     )
     LOCAL_LLM_BASE_URL: str = Field(
         default="http://localhost:11434/v1",

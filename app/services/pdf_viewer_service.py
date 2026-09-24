@@ -16,8 +16,7 @@ def save_uploaded_pdf(pdf_hash: str, pdf_bytes: bytes) -> Path:
     Ruta: data/uploads/{pdf_hash}.pdf
     """
     file_path = UPLOADS_DIR / f"{pdf_hash}.pdf"
-    if not file_path.exists():
-        file_path.write_bytes(pdf_bytes)
+    file_path.write_bytes(pdf_bytes)
     return file_path
 
 

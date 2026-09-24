@@ -9,7 +9,7 @@
 
 PyDective es un motor de inteligencia documental universal disenado para analizar **contratos, polizas, actas, soportes legales, balances financieros, historias clinicas y cualquier tipo documental** a partir de parametros arbitrarios provistos por el usuario o seleccionados mediante chips interactivos.
 
-### Pilares de Rendimiento (ADR-001 a ADR-007)
+### Pilares de Rendimiento (ADR-001 a ADR-008)
 1. **Carril Digital Cero-IA (PyMuPDF):** Extraccion espacial $O(N)$ nativa en C (`page.get_text("words")`) sin costo de red ni inferencia.
 2. **Motores Locales de Vision Autonoma en CPU:**
    - **RapidOCR:** Inferencia ultrarrapida (<180 ms por pagina) con ONNX Runtime y extensiones vectoriales AVX2.
@@ -17,13 +17,14 @@ PyDective es un motor de inteligencia documental universal disenado para analiza
    - **Modo Benchmark Simultaneo:** Evaluacion comparativa en vivo ejecutando ambos motores concurrentemente.
 3. **Ingesta Universal Multi-Formato en Memoria:** Conversion automatica en memoria a PDF equivalente para imagenes (PNG, JPG, TIFF) y formatos ofimaticos (DOCX, XLSX, TXT) preservando UTF-8 nativo y estructura tabular.
 4. **Inyeccion de Capa OCR Invisible (`render_mode=3`):** Habilita la seleccion de texto con cursor y la busqueda interactiva tipo Chrome (`Ctrl+F`) sobre documentos escaneados e imagenes en el visor interactivo (PDF.js).
-5. **Arquitectura Multi-Proveedor Desacoplada:** Operacion en la nube con Google Gemini o 100% offline con proveedores locales via Ollama (`qwen2.5:3b`).
-6. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarizacion Otsu solo para paginas escaneadas o degradadas.
-7. **Cache Escalonada y Singleflight:**
+5. **Arquitectura Multi-Proveedor Desacoplada & CLI:** Operacion en la nube con Google Gemini, local offline con Ollama (`qwen2.5:3b`) o ejecucion directa de CLI de vanguardia (**Antigravity CLI `agy`** con `--dangerously-skip-permissions` y **OpenCode CLI `opencode run`**) en directorios temporales aislados.
+6. **Interoperabilidad OpenAI:** Endpoints estandar `/v1/models` y `/v1/chat/completions` para conexion sin fisuras con Continue, Cline y agentes externos sin errores 404.
+7. **Pydective Chat con Resumenes y Markdown Enriquecido:** Lectura textual de folios en PyMuPDF, mapeo de capitulos (ej: capitulo 2 $\rightarrow$ Folio 4), enrutamiento estricto no determinista hacia el LLM seleccionado, renderizado local de Markdown (`marked.js`) y pastillas interactivas `[Pagina X]` con navegacion al visor.
+8. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarizacion Otsu solo para paginas escaneadas o degradadas.
+9. **Cache Escalonada y Singleflight:**
    - **L0:** Respuestas HTML/JSON instantaneas por `(pdf_hash, query_hash)` (<20 ms).
    - **L1:** Indice asociativo `parametro_normalizado -> list[Evidence]` reutilizable entre distintas consultas sin reabrir el PDF (<50 ms).
    - **Singleflight:** Candado distribuido en Redis / asyncio lock en memoria para evitar estampidas (*dogpile effect*).
-8. **Pydective Chat Grounded:** Busqueda previa en el indice L1 antes de invocar al modelo, reduciendo un 80% de tokens de entrada con citas verificables `[Pagina X]` y salto visual directo.
 
 ---
 
@@ -90,13 +91,15 @@ Abre en tu navegador: [http://localhost:8000](http://localhost:8000)
 | `GET` | `/documentos/{pdf_hash}/raw` | Entrega segura del binario PDF para el visor interactivo PDF.js |
 | `GET` | `/documentos/{pdf_hash}/search` | Buscador de coincidencias exactas estilo Chrome en el PDF |
 | `GET` | `/resultados/{pdf_hash}` | Vista de dictamen forense en Split-View con visor y tabla de hallazgos |
-| `POST` | `/chat/{pdf_hash}` | Pydective Chat documental multi-turno con grounding en L1 |
+| `POST` | `/chat/{pdf_hash}` | Pydective Chat documental multi-turno con grounding en L1 y Markdown |
+| `GET` | `/v1/models` | Catálogo de modelos compatibles con la especificación OpenAI |
+| `POST` | `/v1/chat/completions` | Endpoint conversacional estándar OpenAI para integración con IDEs |
 
 ---
 
 ## 4. Pruebas Automatizadas
 
-La suite de pruebas contiene 136 tests automatizados que cubren validacion de entrada, clasificacion determinista, extraccion espacial, proveedores LLM, caching y visor interactivo:
+La suite de pruebas contiene 139 tests automatizados que cubren validacion de entrada, clasificacion determinista, extraccion espacial, proveedores LLM (Cloud, Local y CLI), caching y visor interactivo:
 
 ```bash
 uv run pytest

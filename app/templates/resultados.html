@@ -5,6 +5,8 @@
 {% block extra_head %}
 <!-- PDF.js library for high-fidelity client-side rendering -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Marked library for rich Markdown rendering in Chat -->
+<script src="/static/js/marked.min.js"></script>
 <link rel="stylesheet" href="/static/css/pdf_viewer.css">
 {% endblock %}
 
@@ -238,10 +240,24 @@
                         </div>
                     </div>
 
+                    <div class="chat-engine-selector" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">Motor IA:</span>
+                        <select id="chat-engine-select" class="form-select form-select-sm" style="background: rgba(15, 23, 42, 0.85); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; padding: 0.2rem 0.6rem; font-size: 0.75rem; outline: none; cursor: pointer;">
+                            <option value="chain" selected>Cadena Automática (agy ➔ opencode ➔ gemini)</option>
+                            <option value="agy">agy (Terminal CLI)</option>
+                            <option value="opencode">opencode (Terminal CLI)</option>
+                            <option value="gemini">Google Gemini API (Cloud Multimodal)</option>
+                            <option value="local">LLM Local CPU (Qwen / Ollama)</option>
+                        </select>
+                    </div>
+
                     <!-- Sugerencias Rápidas de Preguntas -->
                     <div class="chat-suggestions">
                         <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Tiene un código de barras o código QR?')">
                             + ¿Tiene código de barras o QR?
+                        </button>
+                        <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Qué hay en las imágenes del documento? Describe con detalle.')">
+                            + ¿Qué hay en las imágenes?
                         </button>
                         <button type="button" class="suggestion-chip" onclick="askQuickPrompt('¿Cuáles son las partes y representantes identificados?')">
                             + ¿Partes y representantes?

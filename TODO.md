@@ -19,6 +19,10 @@
 - [x] **AI-01 (Arquitectura Multi-Proveedor Desacoplada Cloud / Local):** Crear abstraccion `BaseProvider`, `GeminiProvider` y `LocalProvider` (Ollama con modelo Qwen2.5:3b) con gestion automatica de ciclo de vida del daemon. (Resuelto).
 - [x] **DEV-01 (Compatibilidad Multiplataforma Linux / Windows y Scripts de Arranque):** Implementar `install_dependencies.py`, `run_app.py`, `run.py`, `install.sh` y `run.sh` con deteccion de binarios en rutas POSIX y aislamiento de procesos con `start_new_session=True`. (Resuelto en ADR-007).
 - [x] **UI-03 (Presets de Parametros Rapidos y Fallback de Portapapeles):** Incorporar chips interactivos (+ Nombre / Titular, + Notario, + Valor Declarado, + Cliente), default con 'nombre' y fallback de portapapeles para navegadores Linux Wayland/X11 y entornos sin HTTPS. (Resuelto).
+- [x] **AI-02 (Soporte CLI Multimodal Antigravity y OpenCode):** Implementar `AgyCLIProvider` con `--dangerously-skip-permissions` y `OpenCodeCLIProvider` con `opencode run`, ejecutados en directorio temporal aislado con `cwd=tempfile.gettempdir()` y timeout de 65s. (Resuelto en ADR-008).
+- [x] **AI-03 (Endpoints de Interoperabilidad OpenAI /v1):** Implementar `GET /v1/models` y `POST /v1/chat/completions` para integracion con IDEs y agentes externos eliminando errores 404 en el log. (Resuelto en ADR-008).
+- [x] **CHAT-01 (Lectura Textual de Folios, Mapeo de Capitulos y Resumenes Estrictos):** Integrar lectura directa en PyMuPDF con OCR de diagramas, mapeo regex de capitulos y enrutamiento estricto no determinista hacia el LLM seleccionado. (Resuelto en ADR-008).
+- [x] **UI-04 (Renderizado Markdown Enriquecido y Citas Inline Interactivas):** Incorporar libreria local `marked.min.js` con tipografia dark theme para encabezados, tablas, viñetas y botones interactivos `.inline-page-tag` en `[Pagina X]`. (Resuelto en ADR-008).
 
 ---
 

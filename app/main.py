@@ -451,6 +451,73 @@ async def health_check():
     }
 
 
+@app.get("/v1/models")
+async def list_openai_models():
+    """
+    Endpoint de compatibilidad OpenAI para descubrimiento de modelos por clientes e IDEs.
+    Evita errores 404 al conectarse herramientas como OpenCode, Continue o Antigravity.
+    """
+    return {
+        "object": "list",
+        "data": [
+            {"id": "agy", "object": "model", "created": 1700000000, "owned_by": "antigravity"},
+            {"id": "opencode", "object": "model", "created": 1700000000, "owned_by": "opencode"},
+            {"id": settings.GEMINI_MODEL, "object": "model", "created": 1700000000, "owned_by": "google"},
+            {"id": "gemini-2.5-flash-lite", "object": "model", "created": 1700000000, "owned_by": "google"},
+            {"id": "local", "object": "model", "created": 1700000000, "owned_by": "local"},
+            {"id": "chain", "object": "model", "created": 1700000000, "owned_by": "pydective"},
+        ]
+    }
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(payload: dict):
+    """
+    Endpoint básico de compatibilidad OpenAI Chat Completions.
+    """
+    from app.services.providers import get_llm_provider
+    model_req = payload.get("model", "chain")
+    messages = payload.get("messages", [])
+    
+    prompt = ""
+    system_instruction = None
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "system":
+            system_instruction = content
+        elif role == "user":
+            prompt = content
+
+    provider = get_llm_provider(preference=model_req)
+    response_text = provider.generate_chat_response(
+        prompt=prompt,
+        system_instruction=system_instruction
+    ) or "No fue posible generar una respuesta con el proveedor seleccionado."
+
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_req,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": response_text
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": len(prompt.split()),
+            "completion_tokens": len(response_text.split()),
+            "total_tokens": len(prompt.split()) + len(response_text.split())
+        }
+    }
+
+
 @app.post("/procesar", response_model=JobOutput)
 async def procesar_documento(
     file: UploadFile = File(...),
@@ -1042,12 +1109,14 @@ async def chat_documental(pdf_hash: str, payload: ChatInput):
     """
     Endpoint para Pydective Chat interactivo sobre el documento.
     Consulta el índice L1 y responde con citas comprobables (US-23).
+    Soporta switch manual de motor ('chain', 'agy', 'opencode', 'gemini').
     """
     return process_chat_query(
         pdf_hash=pdf_hash,
         pregunta=payload.pregunta,
         historial=payload.historial,
         fallback_store=MOCK_RESULTS_STORE,
+        motor_seleccionado=payload.motor_seleccionado,
     )
 
 

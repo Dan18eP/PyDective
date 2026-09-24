@@ -3,7 +3,10 @@ import time
 from typing import Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
-import cv2
+try:
+    import cv2
+except Exception:
+    cv2 = None
 from PIL import Image
 import pymupdf
 

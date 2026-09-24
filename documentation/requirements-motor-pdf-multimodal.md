@@ -204,6 +204,9 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | RF-107 | El sistema debe ofrecer un modo de benchmark simultáneo que ejecute ambos motores de visión concurrentemente. | El selector del frontend permite activar ambos motores y comparar latencias y recuentos de hallazgos. |
 | RF-108 | El sistema debe desacoplar el proveedor de inteligencia mediante una arquitectura multi-proveedor (Gemini Cloud vs Ollama Local). | Alternancia transparente de proveedor sin alterar el contrato de inferencia o chat documental. |
 | RF-109 | El sistema debe proveer scripts de instalación y ejecución compatibles con Linux (POSIX) y Windows. | Detección automática de binarios de uv y ollama, arranque desacoplado de daemon y copiado resiliente en navegador. |
+| RF-110 | El sistema debe implementar endpoints de compatibilidad estándar OpenAI (`GET /v1/models` y `POST /v1/chat/completions`) para interoperabilidad con IDEs y agentes externos. | Respuestas conformes a la especificación de OpenAI resolviendo peticiones de Continue, Cline, OpenCode y Antigravity sin errores 404. |
+| RF-111 | El sistema debe soportar ejecución de proveedores de lenguaje por terminal CLI (`agy` y `opencode`) con aislamiento de directorio y bypass de permisos headless. | Invocación de `agy --dangerously-skip-permissions` y `opencode run` ejecutadas con `cwd=tempfile.gettempdir()`, sin bloqueos interactivos y con tiempo límite dinámico de 65s. |
+| RF-112 | El sistema debe permitir lectura documental de folios con detección automática de capítulos y resúmenes ejecutivos renderizados en Markdown enriquecido con citas interactivas. | Procesamiento de solicitudes como "resumen del capítulo X" mediante lectura directa con PyMuPDF/OCR, enrutamiento estricto al LLM sin declinación determinista prematura y renderizado en cliente con `marked.js`. |
 
 ---
 
@@ -318,6 +321,7 @@ El MVP excluye carga masiva, autenticación, multi-tenant, historial de usuario,
 | ADR-005 | Define visor de PDF interactivo, buscador Chrome-like, grounding visual bidireccional y cero mocks |
 | ADR-006 | Define arquitectura dual de visión (RapidOCR vs Florence-2), benchmark en vivo y capa invisible |
 | ADR-007 | Define compatibilidad universal multiplataforma (Linux / Windows) y ciclo de vida de procesos daemon |
+| ADR-008 | Define integración de CLI multimodales (Antigravity & OpenCode), interoperabilidad OpenAI, resúmenes textuales y Markdown |
 | Especificación arquitectónica general | Define módulos, flujos y contratos |
 | Estrategia de pruebas | Debe mapear cada caso crítico a RF/RNF/RV |
 | Historias de usuario | Deben referenciar requisitos aplicables |

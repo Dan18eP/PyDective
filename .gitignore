@@ -65,5 +65,8 @@ data/results/*.json
 data/uploads/*.pdf
 !data/uploads/.gitkeep
 
+# Temporary scratch and render images
+data/temp/
+
 # 100 multi-format test fixtures suite
 tests/fixtures_100/

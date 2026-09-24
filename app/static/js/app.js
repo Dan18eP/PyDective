@@ -381,11 +381,20 @@ async function sendChatMessage() {
     container.scrollTop = container.scrollHeight;
 
     // Append Assistant Loading Bubble
+    // Obtener motor seleccionado por el usuario en el switch manual
+    const engineSelect = document.getElementById("chat-engine-select");
+    const selectedMotor = engineSelect ? engineSelect.value : "chain";
+    const motorLabel = engineSelect ? engineSelect.options[engineSelect.selectedIndex].text : "IA";
+    const sendBtn = document.getElementById("btn-send-chat");
+
     const assistantBubble = document.createElement("div");
     assistantBubble.className = "chat-bubble bubble-assistant";
-    assistantBubble.innerHTML = `<span class="text-muted">Consultando evidencias L1...</span>`;
+    assistantBubble.innerHTML = `<span class="text-muted">Procesando consulta con ${motorLabel}...</span>`;
     container.appendChild(assistantBubble);
     container.scrollTop = container.scrollHeight;
+
+    if (sendBtn) sendBtn.disabled = true;
+    input.disabled = true;
 
     try {
         const response = await fetch(`/chat/${pdfHash}`, {
@@ -393,7 +402,8 @@ async function sendChatMessage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 pregunta: pregunta,
-                historial: chatHistory
+                historial: chatHistory,
+                motor_seleccionado: selectedMotor
             })
         });
 
@@ -406,15 +416,43 @@ async function sendChatMessage() {
         chatHistory.push({ role: "user", content: pregunta });
         chatHistory.push({ role: "assistant", content: data.respuesta });
 
+        let engineBadge = "";
+        if (data.motor_utilizado) {
+            engineBadge = `<div style="margin-bottom: 0.35rem;"><span style="font-size: 0.68rem; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; padding: 0.1rem 0.4rem; font-family: monospace;">⚡ ${data.motor_utilizado}</span></div>`;
+        }
+
         let citasHtml = "";
         if (data.evidencias_relacionadas && data.evidencias_relacionadas.length > 0) {
             citasHtml = `<div class="citations-list" style="margin-top: 0.65rem;">` +
                 data.evidencias_relacionadas.map(ev => {
                     const bboxStr = JSON.stringify(ev.bbox || []);
-                    const label = (ev.text || "Evidencia").substring(0, 25).replace(/'/g, "\\'");
-                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="window.highlightSourceInPdf(${ev.page}, ${bboxStr}, '${label}')" title="Localizar en visor: Pág ${ev.page}">
+                    const rawText = ev.text || "Evidencia";
+
+                    // Extraer etiqueta concisa para la pastilla (Diagrama, Firma, Sello, QR, etc.)
+                    let tag = "Evidencia";
+                    const lowerText = rawText.toLowerCase();
+                    if (lowerText.includes("diagrama") || lowerText.includes("grafico")) tag = "Diagrama";
+                    else if (lowerText.includes("firma")) tag = "Firma";
+                    else if (lowerText.includes("sello")) tag = "Sello";
+                    else if (lowerText.includes("qr")) tag = "Código QR";
+                    else if (lowerText.includes("barra")) tag = "Cód. Barras";
+                    else if (lowerText.includes("arrendador")) tag = "Arrendador";
+                    else if (lowerText.includes("clausula") || lowerText.includes("penal")) tag = "Cláusula";
+                    else if (lowerText.includes("valor") || lowerText.includes("monto") || lowerText.includes("total")) tag = "Valor";
+                    else if (rawText.includes(":")) {
+                        tag = rawText.split(":")[0].replace(/\[Página \d+\]/g, "").trim().substring(0, 15);
+                    } else {
+                        tag = rawText.replace(/\[Página \d+\]/g, "").replace(/en\s*$/i, "").trim().substring(0, 15);
+                    }
+                    if (!tag) tag = "Evidencia";
+
+                    const cleanLabel = (tag + " (Pág " + ev.page + ")").replace(/'/g, "\\'");
+
+                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="window.highlightSourceInPdf(${ev.page}, ${bboxStr}, '${cleanLabel}')" title="Localizar en visor: Pág ${ev.page} (${rawText.replace(/"/g, '&quot;')})">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                        <span>Pág ${ev.page}</span>
+                        <strong>Pág ${ev.page}</strong>
+                        <span style="opacity: 0.6; margin: 0 1px;">·</span>
+                        <span>${tag}</span>
                     </button>`;
                 }).join("") +
                 `</div>`;
@@ -423,19 +461,46 @@ async function sendChatMessage() {
                 data.citas.map(c => {
                     const match = c.match(/\d+/);
                     const pageNum = match ? parseInt(match[0], 10) : 1;
-                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pageNum})" title="Ir a Pág ${pageNum}">
+                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pageNum})" title="Localizar en visor: Pág ${pageNum}">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                        <span>${c}</span>
+                        <strong>Pág ${pageNum}</strong>
                     </button>`;
                 }).join("") +
                 `</div>`;
         }
 
-        assistantBubble.innerHTML = `<p>${data.respuesta}</p>${citasHtml}`;
+        let renderedMarkdown = "";
+        if (typeof marked !== "undefined" && typeof marked.parse === "function") {
+            try {
+                // Configurar marked para saltos de línea suaves y GFM
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true
+                });
+                renderedMarkdown = marked.parse(data.respuesta);
+            } catch (mdErr) {
+                console.warn("[Pydective] Error al parsear markdown:", mdErr);
+                renderedMarkdown = `<p>${data.respuesta.replace(/\n/g, "<br>")}</p>`;
+            }
+        } else {
+            renderedMarkdown = `<p>${data.respuesta.replace(/\n/g, "<br>")}</p>`;
+        }
+
+        // Convertir menciones inline [Página X] en el texto markdown en enlaces interactivos
+        renderedMarkdown = renderedMarkdown.replace(/\[P[aá]gina\s+(\d+)\]/gi, (match, pNum) => {
+            return `<button type="button" class="inline-page-tag" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pNum})" title="Ir a la Página ${pNum} en el visor">${match}</button>`;
+        });
+
+        assistantBubble.innerHTML = `${engineBadge}<div class="chat-markdown-body">${renderedMarkdown}</div>${citasHtml}`;
         container.scrollTop = container.scrollHeight;
     } catch (err) {
         assistantBubble.innerHTML = `<p style="color: var(--danger);">[Error] ${err.message}</p>`;
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+        input.disabled = false;
+        input.focus();
     }
+
 }
 
 // Toast Notifications

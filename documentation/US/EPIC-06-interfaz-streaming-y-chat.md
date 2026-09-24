@@ -79,13 +79,13 @@
 ### US-23: Pydective Chat con Grounding en L1 y Citas Verificables
 
 - **ID:** `US-23`
-- **Requisitos asociados:** `RF-093`, `RF-094`, `ADR-004 Sección 12`
-- **Prioridad:** Alta | **Estimación:** 5 pts
+- **Requisitos asociados:** `RF-093`, `RF-094`, `RF-110`, `RF-111`, `RF-112`, `ADR-004 Sección 12`, `ADR-008`
+- **Prioridad:** Alta | **Estimación:** 8 pts
 
 #### Narrativa
-**Como** usuario que explora un contrato o expediente extenso,  
-**Quiero** hacer preguntas en lenguaje natural a través de Pydective Chat (`POST /chat/{pdf_hash}`),  
-**Para** obtener respuestas directas fundamentadas exclusivamente en el índice asociativo de L1 con citas expresas `[Página X]`.
+**Como** usuario o perito que examina contratos y expedientes complejos,  
+**Quiero** realizar consultas libres, pedir lecturas de cláusulas y resúmenes ejecutivos por capítulo a través de Pydective Chat (`POST /chat/{pdf_hash}`), pudiendo alternar entre motores de lenguaje (Gemini, agy, opencode, local) y visualizando respuestas formateadas en Markdown enriquecido con citas interactivas,  
+**Para** analizar el expediente con máxima fidelidad, sin bloqueos deterministas prematuros y navegando directamente al folio citado en el visor.
 
 #### Criterios de Aceptación (Gherkin)
 1. **Escenario: Retrieval asociativo previo antes de Gemini (Ahorro del 80% de tokens)**
@@ -96,9 +96,19 @@
 2. **Escenario: Citas obligatorias y declinación ante datos ausentes**
    - **Dado** que la respuesta del modelo localiza el dato en la página 3,
    - **Cuando** se emite la respuesta al usuario,
-   - **Entonces** incluye la cita `[Página 3]` enlazada al `evidence_id`. Si el dato no figura en el documento, declara explícitamente su ausencia sin alucinar.
+   - **Entonces** incluye la cita `[Página 3]` enlazada al `evidence_id`. Si el dato no figura en el documento y la consulta es cerrada, declara explícitamente su ausencia sin alucinar.
 
-3. **Escenario: Documento no encontrado o sesión expirada (HTTP 404)**
+3. **Escenario: Lectura textual y resúmenes por capítulo con enrutamiento estricto a IA**
+   - **Dado** una pregunta como *"hazme un resumen sobre el capitulo 2"* con motor `agy` u `opencode` seleccionado,
+   - **Cuando** `chat_service.py` detecta el número de capítulo,
+   - **Entonces** localiza la página exacta (Pág 4: Cláusulas Económicas), extrae el texto nativo con PyMuPDF / RapidOCR y transfiere la síntesis al motor CLI sin interceptar deterministamente, retornando las cláusulas con cita `[Página 4]`.
+
+4. **Escenario: Renderizado de Markdown y citas inline interactivas en cliente**
+   - **Dado** una respuesta del modelo con formato Markdown (encabezados `###`, viñetas, negritas, tablas),
+   - **Cuando** `app.js` recibe el payload,
+   - **Entonces** procesa el contenido con `marked.min.js` y transforma las citas `[Página X]` en botones `.inline-page-tag` que saltan inmediatamente al folio correspondiente en el visor PDF.
+
+5. **Escenario: Documento no encontrado o sesión expirada (HTTP 404)**
    - **Dado** una petición de chat para un `pdf_hash` no existente o expirado en L1,
    - **Cuando** el endpoint recibe la llamada,
    - **Entonces** responde HTTP 404 con error estructurado `DOCUMENT_NOT_FOUND_OR_EXPIRED`, solicitando recargar el PDF para iniciar una nueva sesión.

@@ -108,6 +108,10 @@ class ChatMessage(BaseModel):
 class ChatInput(BaseModel):
     pregunta: str = Field(min_length=1)
     historial: List[ChatMessage] = Field(default_factory=list)
+    motor_seleccionado: Optional[str] = Field(
+        default=None,
+        description="Motor LLM a utilizar: 'chain', 'agy', 'opencode', 'gemini' o 'local'"
+    )
 
 
 class ChatOutput(BaseModel):
@@ -117,3 +121,8 @@ class ChatOutput(BaseModel):
         description="Citas formateadas para la UI, ej: ['Página 7']"
     )
     evidencias_relacionadas: List[Evidence] = Field(default_factory=list)
+    motor_utilizado: Optional[str] = Field(
+        default=None,
+        description="Motor LLM que generó la respuesta"
+    )
+

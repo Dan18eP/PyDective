@@ -25,8 +25,12 @@ class BaseLLMProvider(ABC):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.2,
+        image_bytes: Optional[bytes] = None,
+        image_path: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Genera una respuesta en lenguaje natural para el asistente conversacional.
+        Genera una respuesta en lenguaje natural para el asistente conversacional,
+        con soporte opcional de inspección de imagen (multimodal o vía archivo).
         """
         pass
+

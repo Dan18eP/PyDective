@@ -158,8 +158,12 @@ def process_chat_query(
     if l1_entry is None and fallback_job is None:
         raise DocumentoNoEncontradoOExpiradoError(pdf_hash)
 
+    GENERIC_STOP_TOKENS = {
+        "documento", "documentos", "archivo", "archivos", "folio", "folios",
+        "pagina", "paginas", "texto", "resumen", "sintesis"
+    }
     q_norm = normalize_parameter(pregunta)
-    q_tokens = [t for t in q_norm.split() if len(t) > 2]
+    q_tokens = [t for t in q_norm.split() if len(t) > 2 and t not in GENERIC_STOP_TOKENS]
     concepto_limpio = _clean_query_concept(pregunta)
 
     # 1. Obtener páginas procesadas para inspección visual y textual
@@ -253,6 +257,18 @@ def process_chat_query(
                     if ev not in matched_evidences:
                         matched_evidences.append(ev)
 
+        # Si se identificaron hallazgos estructurados para las partes y representantes, responder directamente
+        if matched_findings:
+            pages = sorted(list(set(e.page for e in matched_evidences))) or [1]
+            citas = [f"[Página {p}]" for p in pages]
+            citas_str = ", ".join(citas)
+            details = "; ".join(matched_findings[:4])
+            return ChatOutput(
+                respuesta=f"De acuerdo con los registros del documento en {citas_str}, las partes y representantes identificados son: {details}.",
+                citas=citas,
+                evidencias_relacionadas=matched_evidences[:4],
+            )
+
     # 3c. Extracción directa del texto literal de los folios del documento para fundamentación estricta
     page_texts: List[str] = []
     text_evidences: List[Evidence] = []
@@ -307,22 +323,43 @@ def process_chat_query(
             target_context = get_or_create_page_indexed_markdown(pdf_hash)
 
         if target_context:
+            is_global_summary = any(
+                k in q_norm for k in (
+                    "resumen", "sintesis", "de que trata", "vision general", "panorama",
+                    "explicacion general", "resume el documento", "resumen ejecutivo"
+                )
+            )
             try:
-                sys_instruction = (
-                    "Eres un asistente experto analizando documentos estructurados. "
-                    "Tu objetivo es responder las solicitudes del usuario basándote exclusivamente en el contexto provisto.\n\n"
-                    "REGLAS DE OBLIGATORIO CUMPLIMIENTO:\n"
-                    "1. Debes identificar en qué número de página exacta se encuentra la información utilizando como referencia única las etiquetas ocultas del documento: `<!-- INICIO_PAGINA_X -->`.\n"
-                    "2. Tu respuesta debe ser breve, directa y estructurada, indicando la página y el dato exacto hallado (ej: '[Página X]').\n"
-                    "3. Si el usuario te pregunta algo que no se encuentra en el documento, responde indicando que la información no está disponible."
-                )
-                prompt = (
-                    "--- INICIO DEL DOCUMENTO ---\n"
-                    f"{target_context}\n"
-                    "--- FIN DEL DOCUMENTO ---\n\n"
-                    "SOLICITUD DEL USUARIO:\n"
-                    f"{pregunta}"
-                )
+                if is_global_summary:
+                    sys_instruction = (
+                        "Eres un perito analista documental experto. Redacta un resumen ejecutivo claro, "
+                        "estructurado y profesional del documento basado en los folios provistos. "
+                        "Indica de forma ordenada: 1) Tipo de documento y propósito principal, 2) Partes u organizaciones involucradas, "
+                        "3) Aspectos contractuales, técnicos o financieros destacados, y 4) Conclusiones clave. "
+                        "Cita siempre las páginas de referencia en formato '[Página X]'."
+                    )
+                    prompt = (
+                        "--- EXTRACTO ESTRUCTURAL DEL DOCUMENTO ---\n"
+                        f"{target_context}\n"
+                        "--- FIN DEL EXTRACTO ---\n\n"
+                        "SOLICITUD: Genera un resumen ejecutivo completo, claro y fundamentado del documento."
+                    )
+                else:
+                    sys_instruction = (
+                        "Eres un asistente experto analizando documentos estructurados. "
+                        "Tu objetivo es responder las solicitudes del usuario basándote exclusivamente en el contexto provisto.\n\n"
+                        "REGLAS DE OBLIGATORIO CUMPLIMIENTO:\n"
+                        "1. Debes identificar en qué número de página exacta se encuentra la información utilizando como referencia única las etiquetas ocultas del documento: `<!-- INICIO_PAGINA_X -->`.\n"
+                        "2. Tu respuesta debe ser breve, directa y estructurada, indicando la página y el dato exacto hallado (ej: '[Página X]').\n"
+                        "3. Si el usuario te pregunta algo que no se encuentra en el documento, responde indicando que la información no está disponible."
+                    )
+                    prompt = (
+                        "--- INICIO DEL DOCUMENTO ---\n"
+                        f"{target_context}\n"
+                        "--- FIN DEL DOCUMENTO ---\n\n"
+                        "SOLICITUD DEL USUARIO:\n"
+                        f"{pregunta}"
+                    )
 
                 resp_text = llm_provider.generate_chat_response(
                     prompt=prompt,
@@ -330,14 +367,16 @@ def process_chat_query(
                 )
 
                 if resp_text:
-                    # Detectar si la información no está disponible
-                    lower_resp = resp_text.lower()
-                    is_unavailable = any(
-                        p in lower_resp for p in (
-                            "no está disponible", "no esta disponible", "no se encuentra",
-                            "no figura", "no aparece", "no hay registro", "no se menciona"
+                    # Detectar si la información no está disponible (no aplicable a resúmenes generales)
+                    is_unavailable = False
+                    if not is_global_summary:
+                        lower_resp = resp_text.lower()
+                        is_unavailable = any(
+                            p in lower_resp for p in (
+                                "no está disponible", "no esta disponible", "no se encuentra",
+                                "no figura", "no aparece", "no hay registro", "no se menciona"
+                            )
                         )
-                    )
 
                     # Extraer números de páginas citadas
                     cited_pages = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]

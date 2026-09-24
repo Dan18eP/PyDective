@@ -286,6 +286,32 @@ def _search_visual_query(
     citas = [f"[Página {p}]" for p in matching_pages]
     citas_str = ", ".join(citas)
 
+    # Detectar si el usuario especificó una página concreta (ej: "de la pagina 2", "en pag 5", "folio 3")
+    target_page = None
+    target_match = re.search(r"\b(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*(\d+)\b", pregunta_norm)
+    if target_match:
+        target_page = int(target_match.group(1))
+
+    if target_page is not None:
+        p_items = [d.replace(f"[Página {target_page}]: ", "") for d in item_descriptions if f"[Página {target_page}]" in d]
+        p_evs = [e for e in evidences if e.page == target_page]
+        cita = f"[Página {target_page}]"
+
+        if p_items:
+            detalles_str = "; ".join(p_items)
+            respuesta = f"En la {cita}, el elemento visual corresponde a: {detalles_str}."
+            return ChatOutput(
+                respuesta=respuesta,
+                citas=[cita],
+                evidencias_relacionadas=p_evs[:2],
+            )
+        else:
+            return ChatOutput(
+                respuesta=f"En la {cita} no se identificaron elementos visuales. Los elementos visuales registrados en el documento se encuentran en: {citas_str}.",
+                citas=citas,
+                evidencias_relacionadas=[],
+            )
+
     if is_detail_query:
         # Responder con el desglose exacto de significado y contenido (0 tokens)
         items_formatted = "\n".join([f"- {d}" for d in item_descriptions[:8]])
@@ -331,6 +357,25 @@ def get_relevant_page_slices(pdf_hash: str, pregunta: str, max_pages: int = 2) -
         return markdown_doc
 
     q_clean = _strip_accents(pregunta)
+
+    # Si es una consulta de resumen global, seleccionar las páginas ancla (Carátula, Alcance y Cierre/Firmas)
+    is_global_summary = any(
+        k in q_clean for k in (
+            "resumen", "sintesis", "de que trata", "vision general", "panorama", "explicacion general"
+        )
+    )
+    if is_global_summary:
+        sorted_all_pages = sorted(list(pages_dict.keys()))
+        anchor_pages = [sorted_all_pages[0]]
+        if len(sorted_all_pages) > 1:
+            anchor_pages.append(sorted_all_pages[1])
+        if len(sorted_all_pages) > 2 and sorted_all_pages[-1] not in anchor_pages:
+            anchor_pages.append(sorted_all_pages[-1])
+        return "\n\n".join(
+            f"<!-- INICIO_PAGINA_{p} -->\n{pages_dict[p]}\n<!-- FIN_PAGINA_{p} -->"
+            for p in anchor_pages
+        )
+
     q_tokens = [w for w in re.findall(r"\b\w{3,}\b", q_clean) if w not in SPANISH_STOP_WORDS]
 
     if not q_tokens:
@@ -440,6 +485,14 @@ def deterministic_search(
                     if syn not in expanded_search_terms:
                         expanded_search_terms.append(syn)
 
+    is_party_identity_query = any(
+        k in q_clean for k in (
+            "partes y representantes", "representantes", "quienes son las partes",
+            "cuales son las partes", "partes del contrato", "partes identificadas",
+            "partes involucradas", "quien firma", "quienes firman"
+        )
+    )
+
     # 3. Ponderación léxica de bloques descartando tablas de contenido
     page_matches: List[Tuple[int, str, float]] = []  # (p_num, substantive_block, score)
 
@@ -456,6 +509,11 @@ def deterministic_search(
                 continue
 
             line_norm = _strip_accents(line_stripped)
+
+            if is_party_identity_query:
+                # Descartar cláusulas financieras u operativas que contengan la palabra "partes" de forma incidental
+                if any(w in line_norm for w in ("canon", "penal", "pesos", "pagaderos", "mora", "arrendamiento la suma", "multa", "cobro", "tarifa")):
+                    continue
 
             # Buscar correspondencias léxicas directas
             matched_terms = [t for t in expanded_search_terms if re.search(r"\b" + re.escape(t) + r"\b", line_norm)]

@@ -233,3 +233,88 @@ def test_chat_conceptual_parties_and_representatives_grounding():
     assert "ROBERTO ANTONIO JARAMILLO OSPINA" in output.respuesta
     assert "VALERIA MONTOYA DUQUE" in output.respuesta
 
+
+def test_chat_visual_query_targeting_specific_page():
+    """Verifica que 'qué significa la imagen de la pagina 2' filtre exclusivamente a la Página 2."""
+    test_hash = "chat_test_visual_target_page_2"
+    markdown_content = (
+        "<!-- INICIO_PAGINA_1 -->\n"
+        "# CARÁTULA\n"
+        "[Elemento Visual: Logotipo institucional del peritaje | Coordenadas: [30.0, 30.0, 100.0, 100.0]]\n"
+        "<!-- FIN_PAGINA_1 -->\n\n"
+        "<!-- INICIO_PAGINA_2 -->\n"
+        "# REPORTE FINANCIERO\n"
+        "[Elemento Visual: Diagrama de comportamiento financiero trimestral | Coordenadas: [50.0, 200.0, 500.0, 450.0]]\n"
+        "<!-- FIN_PAGINA_2 -->"
+    )
+    l1_entry = L1DocumentEntry(
+        pdf_hash=test_hash,
+        pipeline_version="2.2",
+        status=EstadoCobertura.COMPLETE,
+        paginas_totales=2,
+        paginas_completadas=2,
+        paginas_pendientes=[],
+        resultados_por_pagina=[],
+        documento_markdown_indexado=markdown_content,
+    )
+    set_l1_cache(test_hash, l1_entry)
+
+    output = process_chat_query(
+        pdf_hash=test_hash,
+        pregunta="¿Qué significa la imagen de la página 2?",
+    )
+
+    assert "[Página 2]" in output.citas
+    assert "[Página 1]" not in output.citas  # No debe mezclar elementos de la página 1
+    assert "comportamiento financiero" in output.respuesta.lower()
+    assert "logotipo" not in output.respuesta.lower()
+
+
+def test_chat_global_summary_with_mocked_llm(monkeypatch):
+    """Verifica que 'resumen del documento' genere un resumen ejecutivo y no coincida con palabras comunes."""
+    test_hash = "chat_test_global_summary_doc"
+    markdown_content = (
+        "<!-- INICIO_PAGINA_1 -->\n"
+        "# CONTRATO DE PRESTACIÓN DE SERVICIOS TECNOLÓGICOS\n"
+        "Entre las partes ACME CORP y CLOUD SERVICES S.A.S.\n"
+        "<!-- FIN_PAGINA_1 -->\n\n"
+        "<!-- INICIO_PAGINA_2 -->\n"
+        "## OBJETO Y CONDICIONES\n"
+        "El contratista prestará servicios de infraestructura en la nube.\n"
+        "<!-- FIN_PAGINA_2 -->"
+    )
+    l1_entry = L1DocumentEntry(
+        pdf_hash=test_hash,
+        pipeline_version="2.2",
+        status=EstadoCobertura.COMPLETE,
+        paginas_totales=2,
+        paginas_completadas=2,
+        paginas_pendientes=[],
+        resultados_por_pagina=[],
+        documento_markdown_indexado=markdown_content,
+    )
+    set_l1_cache(test_hash, l1_entry)
+
+    class MockSummaryProvider:
+        name = "mock_gemini"
+
+        def is_available(self):
+            return True
+
+        def generate_chat_response(self, prompt, system_instruction=None, temperature=0.2):
+            assert "EXTRACTO ESTRUCTURAL" in prompt
+            assert "ACME CORP" in prompt
+            return "El documento corresponde a un Contrato de Prestación de Servicios entre ACME CORP y CLOUD SERVICES [Página 1]."
+
+    from app.services import providers
+    monkeypatch.setattr(providers, "get_llm_provider", lambda: MockSummaryProvider())
+
+    output = process_chat_query(
+        pdf_hash=test_hash,
+        pregunta="Dame un resumen del documento",
+    )
+
+    assert "[Página 1]" in output.citas
+    assert "Contrato de Prestación de Servicios" in output.respuesta
+
+

@@ -141,10 +141,22 @@ def save_job_result(pdf_hash: str, output: JobOutput) -> None:
         print(f"[PyDective] Advertencia al persistir job en disco: {exc}")
 
 
+def is_valid_result(output: Optional[JobOutput]) -> bool:
+    """Verifica si un resultado de extracción contiene hallazgos reales y no está vacío o en 0."""
+    if output is None or not output.hallazgos:
+        return False
+    return any(
+        h.valor != "No detectado en el documento" and h.confianza > 0.0
+        for h in output.hallazgos
+    )
+
+
 def get_job_result(pdf_hash: str) -> Optional[JobOutput]:
     # 1. Chequear memoria RAM
     if pdf_hash in MOCK_RESULTS_STORE:
-        return MOCK_RESULTS_STORE[pdf_hash]
+        res = MOCK_RESULTS_STORE[pdf_hash]
+        if is_valid_result(res):
+            return res
 
     # 2. Chequear almacenamiento persistente en disco
     path = RESULTS_DIR / f"{pdf_hash}.json"
@@ -152,8 +164,9 @@ def get_job_result(pdf_hash: str) -> Optional[JobOutput]:
         try:
             raw = path.read_text(encoding="utf-8")
             output = JobOutput.model_validate_json(raw)
-            MOCK_RESULTS_STORE[pdf_hash] = output
-            return output
+            if is_valid_result(output):
+                MOCK_RESULTS_STORE[pdf_hash] = output
+                return output
         except Exception as exc:
             print(f"[PyDective] Error al cargar job desde disco: {exc}")
 
@@ -173,29 +186,38 @@ def get_job_result(pdf_hash: str) -> Optional[JobOutput]:
             hallazgos=cached_l1.hallazgos_previos,
             telemetria=cached_l1.telemetria_original,
         )
-        MOCK_RESULTS_STORE[pdf_hash] = out
-        return out
+        if is_valid_result(out):
+            MOCK_RESULTS_STORE[pdf_hash] = out
+            return out
 
     return None
 
 
 def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
-    """Si el hash coincide con un archivo PDF en el workspace, lo procesa bajo demanda con datos reales."""
-    candidates = [
-        Path(BASE_DIR).parent / "documento_completo_20_paginas.pdf",
-    ]
+    """Si el hash coincide con un archivo subido en data/uploads/ o en fixtures, lo procesa bajo demanda."""
+    candidates = []
+    uploads_file = Path(BASE_DIR).parent / "data" / "uploads" / f"{pdf_hash}.pdf"
+    if uploads_file.exists():
+        candidates.append(uploads_file)
+
+    candidates.append(Path(BASE_DIR).parent / "documento_completo_20_paginas.pdf")
+
     fixtures_dir = Path(BASE_DIR).parent / "tests" / "fixtures"
     if fixtures_dir.exists():
         candidates.extend(fixtures_dir.glob("*.pdf"))
+
+    fixtures_100_dir = Path(BASE_DIR).parent / "tests" / "fixtures_100"
+    if fixtures_100_dir.exists():
+        candidates.extend(fixtures_100_dir.glob("*.*"))
 
     for cand in candidates:
         if cand.exists():
             cand_bytes = cand.read_bytes()
             h = hashlib.sha256(cand_bytes).hexdigest()
-            if h == pdf_hash:
+            if h == pdf_hash or (cand == uploads_file):
                 save_uploaded_pdf(pdf_hash, cand_bytes)
                 _, doc, total_pages = validate_and_read_pdf(cand_bytes, filename=cand.name)
-                canonical_params = ["total", "fecha", "nit", "arrendador", "representante legal"]
+                canonical_params = ["total", "fecha", "nit", "arrendador", "representante legal", "cliente", "notario"]
 
                 all_spatial = []
                 all_ai = []
@@ -208,6 +230,19 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
                     classification = classify_page(page, bypass_threshold=settings.OPENCV_BYPASS_WORD_THRESHOLD)
                     vis = catalog_page_images(page, catalogar_imagenes=True)
                     page_text = page.get_text()
+
+                    # Salvaguarda OCR local autónomo para escaneos o imágenes
+                    if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
+                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        if ocr_full_text.strip():
+                            page_text = ocr_full_text
+                            for b in ocr_boxes:
+                                try:
+                                    rect = pymupdf.Rect(b["bbox"])
+                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                                except Exception:
+                                    pass
+
                     page_findings = extract_spatial_key_values(page, canonical_params) if len(page_text.strip()) > 0 else []
                     all_spatial.extend(page_findings)
                     evs = [e for f in page_findings for e in f.evidencias]
@@ -433,7 +468,7 @@ async def procesar_documento(
 
     # 3. Consulta temprana de Caché L0 instantánea (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
-    if cached_l0 is not None:
+    if cached_l0 is not None and is_valid_result(cached_l0):
         MOCK_RESULTS_STORE[pdf_hash] = cached_l0
         return cached_l0
 
@@ -441,7 +476,7 @@ async def procesar_documento(
     cached_l1 = get_l1_cache(pdf_hash)
     if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
         resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
-        if resolved_l1 is not None:
+        if resolved_l1 is not None and is_valid_result(resolved_l1):
             MOCK_RESULTS_STORE[pdf_hash] = resolved_l1
             return resolved_l1
 
@@ -664,7 +699,7 @@ async def procesar_documento_stream(
 
     # 3. Consulta temprana L0 en streaming (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
-    if cached_l0 is not None:
+    if cached_l0 is not None and is_valid_result(cached_l0):
         async def cached_stream_gen():
             yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': cached_l0.paginas_totales, 'nivel_cache': 'L0'})}\n\n"
             for p in cached_l0.resultados_por_pagina:
@@ -676,7 +711,7 @@ async def procesar_documento_stream(
     cached_l1 = get_l1_cache(pdf_hash)
     if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
         resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
-        if resolved_l1 is not None:
+        if resolved_l1 is not None and is_valid_result(resolved_l1):
             async def l1_stream_gen():
                 yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': resolved_l1.paginas_totales, 'nivel_cache': 'L1'})}\n\n"
                 for p in resolved_l1.resultados_por_pagina:
@@ -731,6 +766,19 @@ async def procesar_documento_stream(
 
                 # 1. Extracción espacial determinista nativa (Cero-IA) SIEMPRE que haya texto en la página
                 page_text = page.get_text()
+
+                # Salvaguarda OCR-01 / OCR-02: Para páginas clasificadas como NEEDS_AI sin texto nativo, invocar OCR local autónomo
+                if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
+                    ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                    if ocr_full_text.strip():
+                        page_text = ocr_full_text
+                        for b in ocr_boxes:
+                            try:
+                                rect = pymupdf.Rect(b["bbox"])
+                                page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                            except Exception:
+                                pass
+
                 if len(page_text.strip()) > 0:
                     t_r = time.perf_counter()
                     page_findings = extract_spatial_key_values(page, canonical_params)

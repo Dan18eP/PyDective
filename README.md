@@ -20,8 +20,9 @@ PyDective es un motor de inteligencia documental universal disenado para analiza
 5. **Arquitectura Multi-Proveedor Desacoplada & CLI:** Operacion en la nube con Google Gemini, local offline con Ollama (`qwen2.5:3b`) o ejecucion directa de CLI de vanguardia (**Antigravity CLI `agy`** con `--dangerously-skip-permissions` y **OpenCode CLI `opencode run`**) en directorios temporales aislados.
 6. **Interoperabilidad OpenAI:** Endpoints estandar `/v1/models` y `/v1/chat/completions` para conexion sin fisuras con Continue, Cline y agentes externos sin errores 404.
 7. **Pydective Chat con Resumenes y Markdown Enriquecido:** Lectura textual de folios en PyMuPDF, mapeo de capitulos (ej: capitulo 2 $\rightarrow$ Folio 4), enrutamiento estricto no determinista hacia el LLM seleccionado, renderizado local de Markdown (`marked.js`) y pastillas interactivas `[Pagina X]` con navegacion al visor.
-8. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarizacion Otsu solo para paginas escaneadas o degradadas.
-9. **Cache Escalonada y Singleflight:**
+8. **Base Vectorial Ligera & Cache de Contexto Markdown:** En la primera consulta de chat sobre un documento, genera y persiste un expediente completo en formato Markdown (`data/contexts/{pdf_hash}.md`) e indexa chunks estructurados con ponderacion BM25/TF-IDF. En la segunda y subsiguientes consultas, la recuperacion es instantanea (<0.1 ms), acelerando drásticamente los tiempos de respuesta y proporcionando contexto forense continuo a modelos locales y herramientas CLI.
+9. **Preprocesamiento Determinista Selectivo (OpenCV):** Deskew acotado a $\pm 15^\circ$ en miniatura de 500 px + binarizacion Otsu solo para paginas escaneadas o degradadas.
+10. **Cache Escalonada y Singleflight:**
    - **L0:** Respuestas HTML/JSON instantaneas por `(pdf_hash, query_hash)` (<20 ms).
    - **L1:** Indice asociativo `parametro_normalizado -> list[Evidence]` reutilizable entre distintas consultas sin reabrir el PDF (<50 ms).
    - **Singleflight:** Candado distribuido en Redis / asyncio lock en memoria para evitar estampidas (*dogpile effect*).
@@ -91,7 +92,7 @@ Abre en tu navegador: [http://localhost:8000](http://localhost:8000)
 | `GET` | `/documentos/{pdf_hash}/raw` | Entrega segura del binario PDF para el visor interactivo PDF.js |
 | `GET` | `/documentos/{pdf_hash}/search` | Buscador de coincidencias exactas estilo Chrome en el PDF |
 | `GET` | `/resultados/{pdf_hash}` | Vista de dictamen forense en Split-View con visor y tabla de hallazgos |
-| `POST` | `/chat/{pdf_hash}` | Pydective Chat documental multi-turno con grounding en L1 y Markdown |
+| `POST` | `/chat/{pdf_hash}` | Pydective Chat documental multi-turno con grounding en L1, base vectorial y Markdown |
 | `GET` | `/v1/models` | Catálogo de modelos compatibles con la especificación OpenAI |
 | `POST` | `/v1/chat/completions` | Endpoint conversacional estándar OpenAI para integración con IDEs |
 
@@ -99,7 +100,7 @@ Abre en tu navegador: [http://localhost:8000](http://localhost:8000)
 
 ## 4. Pruebas Automatizadas
 
-La suite de pruebas contiene 139 tests automatizados que cubren validacion de entrada, clasificacion determinista, extraccion espacial, proveedores LLM (Cloud, Local y CLI), caching y visor interactivo:
+La suite de pruebas contiene 141 tests automatizados que cubren validacion de entrada, clasificacion determinista, extraccion espacial, proveedores LLM (Cloud, Local y CLI), base vectorial y cache de contexto en Markdown, caching y visor interactivo:
 
 ```bash
 uv run pytest

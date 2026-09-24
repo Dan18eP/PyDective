@@ -68,5 +68,9 @@ data/uploads/*.pdf
 # Temporary scratch and render images
 data/temp/
 
+# Document contexts cache
+data/contexts/*.md
+!data/contexts/.gitkeep
+
 # 100 multi-format test fixtures suite
 tests/fixtures_100/

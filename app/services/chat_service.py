@@ -298,17 +298,49 @@ def process_chat_query(
                     if ev not in matched_evidences:
                         matched_evidences.append(ev)
 
-    # 3c. Extracción directa del texto literal de los folios del documento y preparación visual
+    # 3c. Integración con Base Vectorial y Caché de Contexto en Markdown (.md)
     page_texts: List[str] = []
     text_evidences: List[Evidence] = []
     image_bytes_for_llm: Optional[bytes] = None
     image_path_for_llm: Optional[str] = None
     target_page_for_evidence = target_page_num or 1
+    doc_markdown_path: Optional[str] = None
 
     try:
         from app.services.pdf_viewer_service import get_pdf_bytes_by_hash
+        from app.services.vector_store import get_or_create_vector_store
         import pymupdf
+
         pdf_bytes = get_pdf_bytes_by_hash(pdf_hash)
+        
+        # 1ra o N-ésima petición: Obtiene o crea el archivo .md y la base vectorial indexada
+        vstore, md_content, md_file_path = get_or_create_vector_store(
+            pdf_hash=pdf_hash,
+            pdf_bytes=pdf_bytes,
+            resultados_paginas=resultados_paginas,
+        )
+        if md_file_path and md_file_path.exists():
+            doc_markdown_path = str(md_file_path)
+
+        # Recuperación vectorial de los fragmentos más relevantes para la consulta
+        relevant_chunks = vstore.similarity_search(pregunta, top_k=5)
+        for chunk, score in relevant_chunks:
+            chunk_page = chunk.page
+            snippet = f"--- [Página {chunk_page} (Score: {score:.2f})] ---\n{chunk.text}"
+            if snippet not in page_texts:
+                page_texts.append(snippet)
+            if score > 0.4 and not any(e.page == chunk_page for e in text_evidences):
+                text_evidences.append(
+                    Evidence(
+                        evidence_id=f"ev_vec_{chunk.chunk_id}_p{chunk_page}",
+                        page=chunk_page,
+                        text=f"Relevancia vectorial ({chunk.heading or 'Texto'}) en [Página {chunk_page}]",
+                        bbox=[50.0, 50.0, 545.0, 200.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=min(0.98, 0.70 + (score / 10.0)),
+                    )
+                )
+
         if pdf_bytes:
             doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
             total_pages = max(total_pages, len(doc))
@@ -378,6 +410,7 @@ def process_chat_query(
                         )
                         break
 
+            # Complementar con páginas críticas si es resumen o consulta específica
             for p_idx in range(len(doc)):
                 p_num = p_idx + 1
                 p_text = doc[p_idx].get_text().strip()
@@ -391,7 +424,9 @@ def process_chat_query(
                     or (any(t in p_norm for t in q_tokens) if q_tokens else False)
                 )
                 if is_key_page:
-                    page_texts.append(f"--- [Página {p_num}] ---\n{p_text[:1400]}")
+                    snippet = f"--- [Página {p_num}] ---\n{p_text[:1400]}"
+                    if snippet not in page_texts:
+                        page_texts.append(snippet)
                     if is_party_query and any(k in p_norm for k in ("suscritos", "arrendador", "representad", "contrat")):
                         text_evidences.append(
                             Evidence(
@@ -405,7 +440,7 @@ def process_chat_query(
                         )
             doc.close()
     except Exception as e:
-        logger.debug(f"No se pudo cargar texto directo de PDF para chat: {e}")
+        logger.debug(f"No se pudo cargar texto directo de PDF o base vectorial para chat: {e}")
 
     if is_summary_query and not text_evidences and not matched_evidences:
         text_evidences.append(
@@ -476,6 +511,9 @@ def process_chat_query(
                 context_summary += f"\nInventario de elementos forenses consultados (Total detectado en documento: {len(relevant_visuals_desc)}):\n" + "\n".join(relevant_visuals_desc) + "\n"
             elif all_visuals_desc:
                 context_summary += "\nInventario visual forense registrado en el documento:\n" + "\n".join(all_visuals_desc[:25]) + "\n"
+
+            if doc_markdown_path:
+                context_summary += f"\nArchivo completo de contexto Markdown persistido disponible en: {doc_markdown_path}\n"
 
             sys_instruction = (
                 "Eres el asistente forense documental y de visión pericial de PyDective. "

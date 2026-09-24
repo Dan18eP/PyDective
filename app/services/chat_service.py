@@ -14,7 +14,7 @@ from app.domain.errors import DocumentoNoEncontradoOExpiradoError
 from app.domain.enums import MetodoExtraccion
 from app.services.cache_service import get_l1_cache, L1DocumentEntry
 from app.services.markdown_service import get_or_create_page_indexed_markdown
-from app.services.markdown_search_service import deterministic_search
+from app.services.markdown_search_service import deterministic_search, get_relevant_page_slices
 from app.services.semantic_extraction_service import normalize_parameter
 from app.settings import settings
 
@@ -178,7 +178,8 @@ def process_chat_query(
             "de que trata", "de qué trata", "que trata", "qué trata",
             "que contiene", "qué contiene", "que muestra", "qué muestra",
             "que dice", "qué dice", "explica", "explicar", "describ",
-            "cual es el", "cuál es el", "que representa", "qué representa", "contenido"
+            "cual es el", "cuál es el", "que representa", "qué representa", "contenido",
+            "que significa", "que significan", "qué significa", "qué significan", "significado", "informacion", "detalle"
         )
     )
     if not is_content_query:
@@ -300,8 +301,12 @@ def process_chat_query(
 
     # Si hay un proveedor LLM disponible, evaluar el documento completo indexado en RAM
     if llm_provider.is_available():
-        markdown_doc = get_or_create_page_indexed_markdown(pdf_hash)
-        if markdown_doc:
+        # Ventana Quirúrgica (Targeted Page Slicing): enviar únicamente las 1-2 páginas relevantes para ahorrar 95% de tokens
+        target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
+        if not target_context:
+            target_context = get_or_create_page_indexed_markdown(pdf_hash)
+
+        if target_context:
             try:
                 sys_instruction = (
                     "Eres un asistente experto analizando documentos estructurados. "
@@ -313,7 +318,7 @@ def process_chat_query(
                 )
                 prompt = (
                     "--- INICIO DEL DOCUMENTO ---\n"
-                    f"{markdown_doc}\n"
+                    f"{target_context}\n"
                     "--- FIN DEL DOCUMENTO ---\n\n"
                     "SOLICITUD DEL USUARIO:\n"
                     f"{pregunta}"

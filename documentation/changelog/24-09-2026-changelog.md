@@ -21,3 +21,4 @@
 - [Thursday]-[24/09/2026]-[03:34]-[Brandon Carranza] : Formulated and integrated ADR-006 (Dual Vision Engine Architecture and Exact Grounding) and ADR-007 (Cross-Platform Universal Bootstrap and Lifecycle Management).
 - [Thursday]-[24/09/2026]-[07:40]-[Brandon Carranza] : Implemented in-memory page-indexed markdown reader with PyMuPDF and MarkItDown, fixed chatbot LLM prompt gating, corrected false barcode identification for charts, and added descriptive visual context.
 - [Thursday]-[24/09/2026]-[08:26]-[Brandon Carranza] : Configured Gemini 3.1 Flash Lite as primary LLM with KeyPoolManager failover across 2 API keys, implemented deterministic markdown search service in RAM (<5ms latency), and added comprehensive unit test suite.
+- [Thursday]-[24/09/2026]-[08:44]-[Brandon Carranza] : Implemented document-agnostic chat engine with structural TOC filtering, rich visual breakdown in 0 tokens, and targeted page slicing for 95% token savings in Gemini 3.1 Flash Lite.

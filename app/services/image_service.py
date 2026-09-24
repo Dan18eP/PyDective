@@ -1,4 +1,5 @@
-from typing import List, Optional
+import re
+from typing import List, Optional, Tuple
 import pymupdf
 from app.domain.models import MetadatoImagen
 
@@ -48,30 +49,34 @@ def inventory_physical_images(
                 )
             )
 
-    # 2. Inspeccionar clústeres de dibujos vectoriales (rúbricas vectoriales / sellos geométricos)
+    # 2. Inspeccionar dibujos vectoriales significativos (filtrando bordes de página y líneas)
     drawings = page.get_drawings()
     if drawings:
-        large_paths = [
-            d["rect"] for d in drawings
-            if d.get("rect") and (d["rect"].width >= 60.0 or d["rect"].height >= 60.0)
-        ]
-        if large_paths:
-            # Clúster delimitador
-            u_x0 = min(r.x0 for r in large_paths)
-            u_y0 = min(r.y0 for r in large_paths)
-            u_x1 = max(r.x1 for r in large_paths)
-            u_y1 = max(r.y1 for r in large_paths)
-            dw = u_x1 - u_x0
-            dh = u_y1 - u_y0
+        for d in drawings:
+            r = d.get("rect")
+            if not r:
+                continue
+            dw = r.width
+            dh = r.height
             d_area_ratio = (dw * dh) / page_area
-            if (dw >= min_dim_pt or dh >= min_dim_pt) and d_area_ratio >= min_area_ratio:
+
+            # Filtrar líneas o divisores ultra delgados
+            if dw <= 5.0 or dh <= 5.0:
+                continue
+
+            # Filtrar marcos completos o bordes perimetrales de la página
+            if (dw > page_rect.width * 0.70 and dh > page_rect.height * 0.65) or d_area_ratio > 0.35:
+                continue
+
+            # Solo dibujos con dimensiones mínimas relevantes y área acotada
+            if (dw >= min_dim_pt or dh >= min_dim_pt) and min_area_ratio <= d_area_ratio <= 0.30:
                 img_counter += 1
                 items.append(
                     MetadatoImagen(
                         id_imagen=f"draw_p{page_num}_{img_counter:02d}",
                         pagina=page_num,
                         tipo_fisico="vector",
-                        bbox=[round(u_x0, 2), round(u_y0, 2), round(u_x1, 2), round(u_y1, 2)],
+                        bbox=[round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2)],
                         area_ratio=round(d_area_ratio, 4),
                         clasificacion_semantica=None,
                     )
@@ -80,58 +85,123 @@ def inventory_physical_images(
     return items
 
 
+def detect_qr_with_opencv(page: pymupdf.Page, bbox: List[float]) -> Tuple[bool, Optional[str]]:
+    """
+    Detecta y decodifica códigos QR mediante visión por computador (OpenCV QRCodeDetector).
+    Retorna (True, decoded_info) si se detecta un patrón de código QR válido.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        rect = pymupdf.Rect(bbox)
+        if rect.width < 25.0 or rect.height < 25.0:
+            return False, None
+
+        # Renderizar recorte con resolución moderada
+        pix = page.get_pixmap(clip=rect, dpi=120)
+        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+        if pix.n == 4:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_BGRA2BGR)
+        elif pix.n == 1:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+
+        detector = cv2.QRCodeDetector()
+        decoded_info, points, _ = detector.detectAndDecode(img_arr)
+        if points is not None or (decoded_info and len(decoded_info.strip()) > 0):
+            val = decoded_info.strip() if decoded_info else None
+            return True, val
+    except Exception:
+        pass
+    return False, None
+
+
 def classify_image_semantics(
     image_meta: MetadatoImagen,
     page_text: str = "",
+    nearby_text: str = "",
+    is_qr_detected: bool = False,
 ) -> str:
     """
-    Clasificación semántica selectiva (US-13 Escenario 2).
-    Tipologías válidas: 'firma_manuscrita', 'sello_oficial', 'logotipo', 'diagrama'.
-    Aplica análisis contextual determinista de alta fidelidad.
+    Clasificación semántica de alta precisión basada en proximidad contextual, geometría y visión OpenCV (US-13).
+    Tipologías válidas: 'firma_manuscrita', 'sello_oficial', 'codigo_barras', 'codigo_qr', 'fotografia', 'logotipo', 'diagrama'.
     """
+    # Si la visión por computador OpenCV ya validó el patrón del código QR
+    if is_qr_detected:
+        return "codigo_qr"
+
     bbox = image_meta.bbox
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-    aspect_ratio = w / max(1.0, h)
+    w = max(1.0, bbox[2] - bbox[0])
+    h = max(1.0, bbox[3] - bbox[1])
+    aspect_ratio = w / h
     y_center = (bbox[1] + bbox[3]) / 2.0
-    text_lower = page_text.lower()
+    is_vector = image_meta.tipo_fisico == "vector"
 
-    # 1. Reglas de firma manuscrita:
-    is_lower_third = y_center > 450
-    has_signature_text = any(
-        kw in text_lower for kw in ("firma", "firmado", "rubrica", "representante", "arrendador", "arrendatario", "cedula")
-    )
-    if (image_meta.tipo_fisico == "vector" or (1.4 <= aspect_ratio <= 4.0)) and (is_lower_third or has_signature_text):
-        return "firma_manuscrita"
+    local_text = (nearby_text if nearby_text else page_text).lower()
+    full_text = f"{nearby_text} {page_text}".lower()
 
-    # 0. Reglas de código de barras y códigos QR:
-    has_barcode_text = any(
-        kw in text_lower for kw in ("radicado", "codigo de barras", "barcode", "rad-", "barras")
-    )
-    if (aspect_ratio >= 3.5 and h <= 80) or (has_barcode_text and aspect_ratio >= 2.0):
-        return "codigo_barras"
-
-    # 2. Reglas de sello oficial:
-    # Aspecto casi cuadrado o circular (aspect ratio entre 0.7 y 1.4) con texto notarial/estatal
-    has_seal_text = any(
-        kw in text_lower for kw in ("sello", "notaria", "notaría", "notario", "alcaldia", "republica", "registraduria", "apostilla", "autenticado")
-    )
-    if 0.7 <= aspect_ratio <= 1.4 and (has_seal_text or is_lower_third):
-        return "sello_oficial"
-
-    # 3. Reglas de fotografía pericial o inspección:
-    has_photo_text = any(
-        kw in text_lower for kw in ("foto", "fotografia", "inspeccion", "evidencia", "rack", "servidor", "gps", "visita")
-    )
-    if (w >= 180 and h >= 100) and has_photo_text:
-        return "fotografia"
-
-    # 4. Reglas de logotipo:
-    # Ubicado en la cabecera del documento (y_center < 160)
-    if y_center <= 160:
+    # 1. Logotipo o cabecera institucional
+    if bbox[1] <= 60 and y_center <= 160 and h <= 160:
         return "logotipo"
 
-    # 5. Diagrama / Gráfico general
+    # Los gráficos vectoriales de ancho completo o gran superficie son cajas/tablas contenedoras o diagramas
+    if is_vector and (w >= 320.0 or h >= 120.0 or image_meta.area_ratio >= 0.08):
+        return "diagrama"
+
+    # 2. Código QR (reconocido por aspecto cuadrado y palabras clave en el entorno o documento)
+    has_qr_text = any(
+        kw in full_text for kw in ("qr", "cufe", "dian", "verificacion", "verificación", "código qr", "codigo qr", "factura electrónica", "factura electronica")
+    )
+    if (0.70 <= aspect_ratio <= 1.40) and (35.0 <= w <= 650.0 and 35.0 <= h <= 650.0) and has_qr_text:
+        return "codigo_qr"
+
+    # 3. Sello oficial notarial o de certificación
+    has_seal_text = any(
+        kw in local_text or kw in full_text for kw in (
+            "sello", "notaria", "notaría", "notario", "circulo", "círculo", "alcaldia", "alcaldía",
+            "republica", "república", "registraduria", "registraduría", "apostilla", "autenticado", "certifico", "oficial", "peritaje"
+        )
+    )
+    if (0.75 <= aspect_ratio <= 1.35) and (w <= 260.0 and h <= 260.0):
+        if has_seal_text or (80.0 <= w <= 240.0 and 80.0 <= h <= 240.0 and any(k in local_text for k in ("notar", "sello"))):
+            return "sello_oficial"
+
+    # 4. Firma manuscrita (acotada a dimensiones reales y contexto inmediato de firmante)
+    has_signature_text = any(
+        kw in local_text for kw in (
+            "firma", "firmado", "rubrica", "rúbrica", "representante", "arrendador", "arrendatario",
+            "c.c.", "cedula", "cédula", "perito", "viceministro", "interventor", "contratante",
+            "contratista", "cardenas", "cárdenas", "gomez", "gómez", "valencia", "jaramillo", "dr.", "dra.", "ing."
+        )
+    )
+    if (1.2 <= aspect_ratio <= 4.5) and (w <= 280.0 and h <= 120.0 and image_meta.area_ratio <= 0.08):
+        if has_signature_text or (not is_vector and y_center > 400 and w <= 220 and h <= 80):
+            return "firma_manuscrita"
+
+    # 5. Código de barras (raster alargado horizontal)
+    if not is_vector:
+        has_barcode_text = any(
+            kw in full_text for kw in ("radicado", "codigo de barras", "código de barras", "barcode", "rad-", "barras")
+        )
+        if (aspect_ratio >= 2.2 and h <= 100 and w <= 350) or has_barcode_text:
+            return "codigo_barras"
+
+    # Si el contexto local describe explícitamente gráficos financieros o diagramas
+    has_diagram_keywords = any(k in local_text for k in ("presupuesto", "financiero", "diagrama", "flujo", "arquitectura", "cronograma", "distribución porcentual", "distribucion porcentual"))
+    if has_diagram_keywords or re.search(r"(?<!foto)gr[aá]fico\b", local_text):
+        return "diagrama"
+
+    # 6. Fotografía pericial o técnica
+    if not is_vector:
+        page_header = page_text.lstrip()[:200].lower()
+        has_annex_photo_header = any(k in page_header for k in ("anexo fotográfico", "anexo fotografico", "registro fotográfico", "acta de inspección", "acta de inspeccion"))
+        has_photo_text = any(
+            kw in local_text for kw in ("foto", "fotografia", "fotografía", "rack", "servidor", "data center", "datacenter")
+        ) or has_annex_photo_header
+        if (w >= 180 and h >= 100) and has_photo_text:
+            return "fotografia"
+
+    # 7. Diagrama / Gráfico general por defecto
     return "diagrama"
 
 
@@ -140,14 +210,98 @@ def catalog_page_images(
     catalogar_imagenes: bool = True,
 ) -> List[MetadatoImagen]:
     """
-    Orquesta el inventario físico y, si catalogar_imagenes es True, asigna tipología semántica (US-13).
+    Orquesta el inventario físico y extrae contexto espacial de proximidad para clasificación semántica (US-13).
     """
     images = inventory_physical_images(page)
     if not catalogar_imagenes or not images:
         return images
 
-    page_text = page.get_text()
+    page_rect = page.rect
+    full_text = page.get_text()
+
     for img in images:
-        img.clasificacion_semantica = classify_image_semantics(img, page_text=page_text)
+        # Extraer texto de proximidad (borde de 40pt alrededor del elemento)
+        clip = pymupdf.Rect(
+            max(0.0, img.bbox[0] - 30.0),
+            max(0.0, img.bbox[1] - 40.0),
+            min(page_rect.width, img.bbox[2] + 30.0),
+            min(page_rect.height, img.bbox[3] + 40.0),
+        )
+        nearby_text = page.get_text("text", clip=clip).strip()
+
+        # Detección y decodificación de código QR mediante visión por computador (OpenCV)
+        is_qr = False
+        w = max(1.0, img.bbox[2] - img.bbox[0])
+        h = max(1.0, img.bbox[3] - img.bbox[1])
+        aspect_ratio = w / h
+        if 0.70 <= aspect_ratio <= 1.40 and (w >= 30.0 and h >= 30.0):
+            is_qr, decoded = detect_qr_with_opencv(page, img.bbox)
+            if is_qr and decoded:
+                img.contenido_decodificado = decoded
+
+        img.clasificacion_semantica = classify_image_semantics(
+            img,
+            page_text=full_text,
+            nearby_text=nearby_text,
+            is_qr_detected=is_qr,
+        )
+
+    # Si ningún elemento fue catalogado como QR, evaluar salvaguarda de escaneo completo
+    has_qr = any(i.clasificacion_semantica == "codigo_qr" for i in images)
+    if not has_qr:
+        page_has_qr_hint = any(kw in full_text.lower() for kw in ("qr", "cufe", "dian", "verificacion", "código qr", "codigo qr"))
+        if not full_text.strip() or page_has_qr_hint:
+            try:
+                import cv2
+                import numpy as np
+
+                pix = page.get_pixmap(dpi=120)
+                img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+                if pix.n == 4:
+                    img_arr = cv2.cvtColor(img_arr, cv2.COLOR_BGRA2BGR)
+                elif pix.n == 1:
+                    img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+
+                detector = cv2.QRCodeDetector()
+                decoded_info, points, _ = detector.detectAndDecode(img_arr)
+                if points is not None or (decoded_info and len(decoded_info.strip()) > 0):
+                    scale = 72.0 / 120.0
+                    pts = points.reshape(-1, 2)
+                    qr_bbox = [
+                        round(float(pts[:, 0].min() * scale), 2),
+                        round(float(pts[:, 1].min() * scale), 2),
+                        round(float(pts[:, 0].max() * scale), 2),
+                        round(float(pts[:, 1].max() * scale), 2),
+                    ]
+                    page_area = max(1.0, page_rect.width * page_rect.height)
+                    qr_area_ratio = max(0.001, (qr_bbox[2] - qr_bbox[0]) * (qr_bbox[3] - qr_bbox[1]) / page_area)
+
+                    # Si ya existe una imagen que contiene o solapa este QR, actualizarla
+                    matched_img = None
+                    for img in images:
+                        if (img.bbox[0] <= qr_bbox[0] + 10 and img.bbox[1] <= qr_bbox[1] + 10 and
+                            img.bbox[2] >= qr_bbox[2] - 10 and img.bbox[3] >= qr_bbox[3] - 10):
+                            matched_img = img
+                            break
+
+                    if matched_img:
+                        matched_img.clasificacion_semantica = "codigo_qr"
+                        if decoded_info and len(decoded_info.strip()) > 0:
+                            matched_img.contenido_decodificado = decoded_info.strip()
+                    else:
+                        page_num = page.number + 1
+                        images.append(
+                            MetadatoImagen(
+                                id_imagen=f"qr_p{page_num}_{len(images)+1:02d}",
+                                pagina=page_num,
+                                tipo_fisico="raster",
+                                bbox=qr_bbox,
+                                area_ratio=round(qr_area_ratio, 4),
+                                clasificacion_semantica="codigo_qr",
+                                contenido_decodificado=decoded_info.strip() if decoded_info and len(decoded_info.strip()) > 0 else None,
+                            )
+                        )
+            except Exception:
+                pass
 
     return images

@@ -4,14 +4,21 @@ import time
 import uuid
 import asyncio
 import hashlib
+import concurrent.futures
 from pathlib import Path
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, File, Form, UploadFile, HTTPException, status
+from fastapi import FastAPI, Request, File, Form, UploadFile, HTTPException, status, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from app.services.pdf_viewer_service import (
+    save_uploaded_pdf,
+    get_pdf_bytes_by_hash,
+    search_exact_pdf_occurrences,
+)
 
 from app.settings import settings
 from app.domain.enums import NivelCache, EstadoCobertura, TipoPagina, MetodoExtraccion
@@ -185,12 +192,15 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
             cand_bytes = cand.read_bytes()
             h = hashlib.sha256(cand_bytes).hexdigest()
             if h == pdf_hash:
+                save_uploaded_pdf(pdf_hash, cand_bytes)
                 _, doc, total_pages = validate_and_read_pdf(cand_bytes, filename=cand.name)
                 canonical_params = ["total", "fecha", "nit", "arrendador", "representante legal"]
 
                 all_spatial = []
                 all_ai = []
                 res_paginas = []
+                ai_queue = []
+
                 for p_idx in range(total_pages):
                     page = doc[p_idx]
                     p_num = p_idx + 1
@@ -199,15 +209,11 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
                     page_text = page.get_text()
                     page_findings = extract_spatial_key_values(page, canonical_params) if len(page_text.strip()) > 0 else []
                     all_spatial.extend(page_findings)
-
                     evs = [e for f in page_findings for e in f.evidencias]
+
                     if classification.tipo == TipoPagina.NEEDS_AI:
                         webp = get_or_render_page_webp(page, pdf_hash, p_num)
-                        gem = invoke_gemini_multimodal_page(webp, p_num, canonical_params, page_text_hint=page_text)
-                        if gem.exito:
-                            all_ai.extend(gem.hallazgos)
-                            for h_ai in gem.hallazgos:
-                                evs.extend(h_ai.evidencias)
+                        ai_queue.append((p_num, webp, page_text))
 
                     res_paginas.append(
                         ResultadoPagina(
@@ -220,6 +226,31 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
                         )
                     )
                 doc.close()
+
+                # Inferencia multimodal concurrente para todas las páginas que requieren IA
+                if ai_queue:
+                    def _call_ai_sync(item):
+                        pn, wb, pt = item
+                        t_ai0 = time.perf_counter()
+                        res = invoke_gemini_multimodal_page(wb, pn, canonical_params, page_text_hint=pt)
+                        dur = (time.perf_counter() - t_ai0) * 1000
+                        return pn, res, dur
+
+                    max_w = min(settings.MAX_WORKERS_PER_JOB, len(ai_queue))
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_w) as pool:
+                        ai_results = list(pool.map(_call_ai_sync, ai_queue))
+
+                    res_by_num = {r.numero_pagina: r for r in res_paginas}
+                    for pn, gem, dur_ms in ai_results:
+                        p_res = res_by_num.get(pn)
+                        if p_res:
+                            p_res.duracion_ms = round(p_res.duracion_ms + dur_ms, 2)
+                        if gem.exito:
+                            all_ai.extend(gem.hallazgos)
+                            if p_res:
+                                for h_ai in gem.hallazgos:
+                                    p_res.evidencias.extend(h_ai.evidencias)
+
                 consolidated = consolidate_findings(all_spatial, all_ai)
                 findings_by_p = {f.parametro: f for f in consolidated}
                 final_h = []
@@ -397,6 +428,7 @@ async def procesar_documento(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    save_uploaded_pdf(pdf_hash, pdf_bytes)
 
     # 3. Consulta temprana de Caché L0 instantánea (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
@@ -426,6 +458,7 @@ async def procesar_documento(
         total_gemini_ms = 0.0
 
         try:
+            ai_queue = []
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
                 page = doc[p_idx]
@@ -452,8 +485,6 @@ async def procesar_documento(
                     page_visuals = catalog_page_images(page, catalogar_imagenes=True)
 
                 page_evidences = []
-                page_exito = True
-                page_error = None
 
                 # 1. Extracción espacial determinista nativa (Cero-IA) SIEMPRE que haya texto en la página
                 page_text = page.get_text()
@@ -465,52 +496,68 @@ async def procesar_documento(
                     for h in page_findings:
                         page_evidences.extend(h.evidencias)
 
-                # 2. Inferencia multimodal con Gemini 2.0 Flash en carril NEEDS_AI (US-11, US-12, US-18)
+                # Si requiere IA, renderizar WebP y encolar para procesamiento paralelo
                 if classification.tipo == TipoPagina.NEEDS_AI:
                     t_ren = time.perf_counter()
                     webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
                     total_render_ms += (time.perf_counter() - t_ren) * 1000
-
-                    t_gem = time.perf_counter()
-                    gemini_res = invoke_gemini_multimodal_page(
-                        image_bytes=webp_bytes,
-                        page_number=p_num,
-                        parameters=canonical_params,
-                        page_text_hint=page_text,
-                    )
-                    total_gemini_ms += (time.perf_counter() - t_gem) * 1000
-
-                    if not gemini_res.exito:
-                        page_exito = False
-                        page_error = gemini_res.error
-                        failed_pages.append(p_num)
-                    else:
-                        all_ai_findings.extend(gemini_res.hallazgos)
-                        for h in gemini_res.hallazgos:
-                            page_evidences.extend(h.evidencias)
+                    ai_queue.append((p_num, webp_bytes, page_text))
 
                 page_dur = round(class_ms + prep_ms, 2)
                 resultados_por_pagina.append(
                     ResultadoPagina(
                         numero_pagina=p_num,
                         tipo=classification.tipo,
-                        exito=page_exito,
-                        error=page_error,
+                        exito=True,
+                        error=None,
                         duracion_ms=page_dur,
                         preprocesado=preprocesado,
                         metadatos_visuales=page_visuals,
                         evidencias=page_evidences,
                     )
                 )
+
+            # Inferencia multimodal concurrente con Gemini en carril NEEDS_AI (US-11, US-12, US-18)
+            # Garantiza que todas las páginas que requieren IA se envían y procesan ANTES de retornar
+            if ai_queue:
+                loop = asyncio.get_running_loop()
+                def _invoke_ai(item):
+                    pn, wb, pt = item
+                    t_gem0 = time.perf_counter()
+                    res = invoke_gemini_multimodal_page(
+                        image_bytes=wb,
+                        page_number=pn,
+                        parameters=canonical_params,
+                        page_text_hint=pt,
+                    )
+                    g_ms = (time.perf_counter() - t_gem0) * 1000
+                    return pn, res, g_ms
+
+                max_workers = min(settings.MAX_WORKERS_PER_JOB, len(ai_queue))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    tasks = [loop.run_in_executor(pool, _invoke_ai, item) for item in ai_queue]
+                    ai_results = await asyncio.gather(*tasks)
+
+                res_by_num = {r.numero_pagina: r for r in resultados_por_pagina}
+                for pn, gemini_res, gem_ms in ai_results:
+                    total_gemini_ms += gem_ms
+                    page_res = res_by_num.get(pn)
+                    if page_res:
+                        page_res.duracion_ms = round(page_res.duracion_ms + gem_ms, 2)
+                        if not gemini_res.exito:
+                            page_res.exito = False
+                            page_res.error = gemini_res.error
+                            failed_pages.append(pn)
+                        else:
+                            all_ai_findings.extend(gemini_res.hallazgos)
+                            for h in gemini_res.hallazgos:
+                                page_res.evidencias.extend(h.evidencias)
         finally:
             doc.close()
 
         # Consolidar hallazgos aplicando precedencia absoluta de texto nativo sobre IA (US-10)
         consolidated_all = consolidate_findings(all_spatial_findings, all_ai_findings)
-        findings_by_param = {}
-        for h in consolidated_all:
-            if h.parametro not in findings_by_param or h.confianza > findings_by_param[h.parametro].confianza:
-                findings_by_param[h.parametro] = h
+        findings_by_param = {h.parametro: h for h in consolidated_all}
 
         final_hallazgos = []
         for p in canonical_params:
@@ -599,6 +646,7 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
+    save_uploaded_pdf(pdf_hash, pdf_bytes)
 
     # 3. Consulta temprana L0 en streaming (US-14)
     cached_l0 = get_l0_cache(pdf_hash, query_hash)
@@ -821,7 +869,7 @@ async def resultados_view(request: Request, pdf_hash: str):
     return templates.TemplateResponse(
         request=request,
         name="resultados.html",
-        context={"resultado": resultado},
+        context={"resultado": resultado, "settings": settings},
     )
 
 
@@ -837,3 +885,46 @@ async def chat_documental(pdf_hash: str, payload: ChatInput):
         historial=payload.historial,
         fallback_store=MOCK_RESULTS_STORE,
     )
+
+
+@app.get("/documentos/{pdf_hash}/raw")
+async def obtener_pdf_crudo(pdf_hash: str):
+    """
+    Sirve el archivo binario del PDF para renderizado de alta fidelidad en el visor PDF.js (RF-100, RF-103).
+    """
+    pdf_bytes = get_pdf_bytes_by_hash(pdf_hash)
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El archivo PDF con hash '{pdf_hash}' no fue encontrado en el servidor.",
+        )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{pdf_hash}.pdf"',
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+@app.get("/documentos/{pdf_hash}/search")
+async def buscar_coincidencias_exactas_pdf(pdf_hash: str, q: str = ""):
+    """
+    Buscador textual exacto estilo Chrome para el visor de PDF (RF-101).
+    Retorna coordenadas rectangulares PyMuPDF [x0, y0, x1, y1] por página.
+    """
+    if not q.strip():
+        return {
+            "query": "",
+            "total_coincidencias": 0,
+            "coincidencias": [],
+        }
+    res = search_exact_pdf_occurrences(pdf_hash, q)
+    if "error" in res and res.get("total_coincidencias") == 0 and not get_pdf_bytes_by_hash(pdf_hash):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=res["error"],
+        )
+    return res
+

@@ -377,9 +377,27 @@ async function sendChatMessage() {
         chatHistory.push({ role: "assistant", content: data.respuesta });
 
         let citasHtml = "";
-        if (data.citas && data.citas.length > 0) {
-            citasHtml = `<div class="citations-list" style="margin-top: 0.5rem;">` +
-                data.citas.map(c => `<span class="citation-pill">${c}</span>`).join("") +
+        if (data.evidencias_relacionadas && data.evidencias_relacionadas.length > 0) {
+            citasHtml = `<div class="citations-list" style="margin-top: 0.65rem;">` +
+                data.evidencias_relacionadas.map(ev => {
+                    const bboxStr = JSON.stringify(ev.bbox || []);
+                    const label = (ev.text || "Evidencia").substring(0, 25).replace(/'/g, "\\'");
+                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="window.highlightSourceInPdf(${ev.page}, ${bboxStr}, '${label}')" title="Localizar en visor: Pág ${ev.page}">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <span>Pág ${ev.page}</span>
+                    </button>`;
+                }).join("") +
+                `</div>`;
+        } else if (data.citas && data.citas.length > 0) {
+            citasHtml = `<div class="citations-list" style="margin-top: 0.65rem;">` +
+                data.citas.map(c => {
+                    const match = c.match(/\d+/);
+                    const pageNum = match ? parseInt(match[0], 10) : 1;
+                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pageNum})" title="Ir a Pág ${pageNum}">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <span>${c}</span>
+                    </button>`;
+                }).join("") +
                 `</div>`;
         }
 

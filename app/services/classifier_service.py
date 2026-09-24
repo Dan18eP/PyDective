@@ -132,14 +132,18 @@ def inventory_page_images(page: pymupdf.Page) -> List[MetadatoImagen]:
                 )
             )
 
-    # 2. Dibujos vectoriales significativos (sellos, firmas, logos vectoriales)
+    # 2. Dibujos vectoriales significativos (filtrando bordes de página y líneas)
     drawings = page.get_drawings()
     for d_idx, d in enumerate(drawings):
         r = d.get("rect")
         if r and r.width > 20 and r.height > 20:
+            if r.width <= 5.0 or r.height <= 5.0:
+                continue
+            if r.width > page_rect.width * 0.70 and r.height > page_rect.height * 0.65:
+                continue
             area = r.width * r.height
             area_ratio = min(1.0, area / page_area)
-            if area_ratio >= 0.005:  # Mínimo 0.5% del área total
+            if 0.005 <= area_ratio <= 0.30:  # Acotado entre 0.5% y 30% del área
                 visual_items.append(
                     MetadatoImagen(
                         id_imagen=f"vec_p{page_num}_{d_idx+1}",
@@ -217,17 +221,19 @@ def classify_page(
         )
 
     # 7. Presencia de elementos visuales significativos (sellos, firmas, gráficos grandes)
+    # Si la página tiene texto vectorial suficiente y alta legibilidad, solo se envía a AI si los gráficos dominan
     if total_graphics_area_ratio >= 0.15:
-        return PageClassification(
-            numero_pagina=page_num,
-            tipo=TipoPagina.NEEDS_AI,
-            readability_score=readability,
-            word_count=word_count,
-            metadatos_visuales=visual_items,
-            total_graphics_area_ratio=total_graphics_area_ratio,
-            bypass_opencv=False,
-            motivo=f"Página con elementos gráficos dominantes (área={total_graphics_area_ratio:.2f} >= 0.15).",
-        )
+        if word_count < 60 or readability < 0.70 or total_graphics_area_ratio >= 0.35:
+            return PageClassification(
+                numero_pagina=page_num,
+                tipo=TipoPagina.NEEDS_AI,
+                readability_score=readability,
+                word_count=word_count,
+                metadatos_visuales=visual_items,
+                total_graphics_area_ratio=total_graphics_area_ratio,
+                bypass_opencv=False,
+                motivo=f"Página con elementos gráficos dominantes (área={total_graphics_area_ratio:.2f} >= 0.15).",
+            )
 
     # 8. Página digital con texto nativo suficiente (US-04 Escenario 1 - Bypass completo)
     if word_count >= bypass_threshold and readability >= min_readability_score:

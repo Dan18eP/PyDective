@@ -80,6 +80,13 @@ SYNONYMS_MAP = {
         "senor(es)",
         "destinatario",
     ],
+    "representante legal": [
+        "representante legal",
+        "representado legalmente",
+        "representada legalmente",
+        "representante",
+        "apoderado",
+    ],
 }
 
 

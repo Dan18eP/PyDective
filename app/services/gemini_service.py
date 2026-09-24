@@ -113,7 +113,8 @@ def invoke_gemini_multimodal_page(
         prompt = (
             f"Extrae con precisión quirúrgica los siguientes parámetros del documento: {', '.join(parameters)}.\n"
             "Devuelve los hallazgos en formato JSON estructurado con parametro, valor, confianza (0.0 a 1.0) "
-            "y bbox [x0, y0, x1, y1] si es detectable."
+            "y bbox [x0, y0, x1, y1] si es detectable. Si un parámetro no está presente o no aplica en esta página, "
+            "NO lo incluyas en la lista de hallazgos."
         )
 
         image_part = types.Part.from_bytes(
@@ -127,15 +128,31 @@ def invoke_gemini_multimodal_page(
             config=config,
         )
 
-        raw_json = response.text or "{}"
-        parsed = json.loads(raw_json)
+        raw_json = (response.text or "{}").strip()
+        if raw_json.startswith("```"):
+            raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
+            raw_json = re.sub(r"\s*```$", "", raw_json).strip()
+
+        try:
+            parsed = json.loads(raw_json)
+        except json.JSONDecodeError:
+            # Fallback en caso de string parcial o truncamiento
+            match = re.search(r"\{.*\}", raw_json, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0))
+            else:
+                parsed = {"hallazgos": [], "elementos_visuales": []}
 
         items = parsed.get("hallazgos", [])
         hallazgos_enriquecidos: List[HallazgoEnriquecido] = []
 
         for idx, item in enumerate(items):
             param = item.get("parametro", "").lower().strip()
-            raw_val = item.get("valor", "").strip()
+            raw_val = str(item.get("valor", "")).strip()
+            if not param or not raw_val or raw_val.lower() in (
+                "no especificado", "no detectado", "no encontrado", "n/a", "na", "null", "none", "no aplica", "-", "--"
+            ):
+                continue
             conf = float(item.get("confianza", 0.85))
             bbox = item.get("bbox", [50.0, 50.0, 200.0, 80.0])
             kwic = item.get("kwic_snippet", raw_val)

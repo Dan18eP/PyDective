@@ -503,6 +503,7 @@ pydective/
 │   │   ├── gemini_service.py   # Fase B red: IA y reintento por página
 │   │   ├── key_pool.py         # Pool, salud, cooldown, semáforo por proyecto
 │   │   ├── cache_service.py    # L0, L1, L2 + InMemoryLRUCache fallback
+│   │   ├── pdf_viewer_service.py # Búsqueda de coordenadas exactas en C y streaming PDF
 │   │   └── semantic_extraction_service.py # Extracción clave-valor, sinónimos y KWIC
 │   │
 │   ├── infrastructure/
@@ -517,7 +518,7 @@ pydective/
 │   │
 │   └── static/
 │       ├── css/
-│       └── js/
+│       └── js/                 # pdf_viewer.js y scripts de interacción
 │
 ├── tests/
 │   ├── unit/
@@ -540,6 +541,7 @@ pydective/
 - `gemini_service.py` no abre PDFs ni sabe de Jinja2.
 - `key_pool.py` no recibe páginas ni crea resultados de negocio.
 - `cache_service.py` no decide reglas de búsqueda.
+- `pdf_viewer_service.py` encapsula la búsqueda geométrica `page.search_for()` y entrega de binarios.
 
 ---
 
@@ -550,6 +552,8 @@ pydective/
 | GET | `/` | Mostrar formulario `index.html` (interfaz Pydective) |
 | POST | `/procesar` | Procesar PDF sincrónicamente y devolver `resultados.html` |
 | GET | `/procesar/stream` | Streaming reactivo SSE del procesamiento página por página |
+| GET | `/documentos/{pdf_hash}/raw` | Entrega segura del archivo PDF binario para renderizado en PDF.js |
+| GET | `/documentos/{pdf_hash}/search` | Búsqueda de ocurrencias exactas con coordenadas bboxes en PyMuPDF |
 | POST | `/chat/{pdf_hash}` | Interrogar al PDF en lenguaje natural con citas por página |
 | GET | `/health` | Salud de aplicación y dependencias esenciales |
 

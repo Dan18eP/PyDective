@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.settings import settings
 
 client = TestClient(app)
 
@@ -20,7 +21,7 @@ def test_health_check_returns_valid_json():
     assert data["status"] == "healthy"
     assert data["app"] == "PyDective"
     assert data["version"] == "2.2.0"
-    assert data["model"] == "gemini-2.0-flash"
+    assert data["model"] == settings.GEMINI_MODEL
     assert data["max_pages"] == 20
 
 

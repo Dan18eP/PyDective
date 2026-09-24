@@ -44,6 +44,7 @@ class MetadatoImagen(BaseModel):
     bbox: List[float]
     area_ratio: float
     clasificacion_semantica: Optional[str] = None
+    contenido_decodificado: Optional[str] = None
 
 
 class ResultadoPagina(BaseModel):

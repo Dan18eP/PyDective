@@ -87,11 +87,15 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
             if matched:
                 if p_num not in found_pages:
                     found_pages.append(p_num)
+                txt = f"Elemento visual detectado: {item_type}"
+                if v.contenido_decodificado:
+                    txt += f" (contenido decodificado: '{v.contenido_decodificado}')"
+                txt += f" en bbox {v.bbox}"
                 evidencias.append(
                     Evidence(
                         evidence_id=f"ev_vis_p{p_num}_{v.id_imagen}",
                         page=p_num,
-                        text=f"Elemento visual detectado: {item_type} en bbox {v.bbox}",
+                        text=txt,
                         bbox=v.bbox,
                         source=MetodoExtraccion.VISUAL_AI,
                         evidence_score=0.96,
@@ -102,7 +106,13 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
         found_pages.sort()
         citas = [f"[Página {p}]" for p in found_pages]
         citas_str = ", ".join(citas)
-        descripcion = f"Sí, el documento cuenta con {item_type} verificado e inventariado en {citas_str}."
+        decoded_notes = []
+        for res in resultados_por_pagina:
+            for v in getattr(res, "metadatos_visuales", []):
+                if v.contenido_decodificado and (is_qr and v.clasificacion_semantica == "codigo_qr"):
+                    decoded_notes.append(f"contenido/URL: {v.contenido_decodificado}")
+        extra_note = f" ({', '.join(decoded_notes)})" if decoded_notes else ""
+        descripcion = f"Sí, el documento cuenta con {item_type} verificado e inventariado en {citas_str}{extra_note}."
 
     return citas, evidencias, descripcion
 

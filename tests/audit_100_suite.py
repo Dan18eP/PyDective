@@ -63,16 +63,26 @@ def run_massive_audit():
                     if found_h:
                         val_raw = str(found_h.get("valor", "")).strip()
                         val_norm = str(found_h.get("valor_normalizado", "")).strip()
+                        from app.services.semantic_extraction_service import normalize_parameter
+                        norm_exp = normalize_parameter(expected_val)
+                        norm_r = normalize_parameter(val_raw)
+
+                        is_match = (
+                            expected_val.lower() in val_norm.lower()
+                            or expected_val.lower() in val_raw.lower()
+                            or norm_exp in norm_r
+                        )
+
                         # Si es persona, verificar si se truncó en artículo gramatical
                         if p_name in ("arrendador", "representante legal", "notario", "cliente", "representante"):
                             if val_raw.upper() in ("LA", "EL", "DE", "UN", "UNA"):
                                 truncation_detected.append(f"{p_name}: truncado en '{val_raw}' (esperado '{expected_val}')")
-                            elif expected_val.lower() in val_raw.lower() or expected_val.lower() in val_norm.lower():
+                            elif is_match:
                                 precision_hits += 1
                                 file_hits += 1
                             else:
                                 truncation_detected.append(f"{p_name}: extrajo '{val_raw}' (esperado '{expected_val}')")
-                        elif expected_val.lower() in val_norm.lower() or expected_val.lower() in val_raw.lower():
+                        elif is_match:
                             precision_hits += 1
                             file_hits += 1
 

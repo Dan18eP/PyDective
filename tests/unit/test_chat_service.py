@@ -170,3 +170,66 @@ def test_chat_grounded_answer_from_fallback_store():
     assert "[Página 1]" in output.citas
     assert len(output.evidencias_relacionadas) == 1
     assert "2026-12-31" in output.respuesta
+
+
+def test_chat_conceptual_parties_and_representatives_grounding():
+    """Verifica que consultas conceptuales abiertas sobre 'partes y representantes' mapeen los hallazgos y citen [Página X]."""
+    test_hash = "chat_test_hash_parties_legal_789"
+    ev_arr = Evidence(
+        evidence_id="ev_p1_arr",
+        page=1,
+        text="ARRENDADOR: ROBERTO ANTONIO JARAMILLO OSPINA",
+        bbox=[50.0, 100.0, 300.0, 120.0],
+        source=MetodoExtraccion.SPATIAL_VECTOR,
+        evidence_score=0.98,
+    )
+    ev_rep = Evidence(
+        evidence_id="ev_p1_rep",
+        page=1,
+        text="REPRESENTANTE LEGAL: VALERIA MONTOYA DUQUE",
+        bbox=[50.0, 130.0, 350.0, 150.0],
+        source=MetodoExtraccion.SPATIAL_VECTOR,
+        evidence_score=0.98,
+    )
+    h_arr = HallazgoEnriquecido(
+        parametro="arrendador",
+        valor="ROBERTO ANTONIO JARAMILLO OSPINA",
+        confianza=0.98,
+        metodo=MetodoExtraccion.SPATIAL_VECTOR,
+        evidencias=[ev_arr],
+        valor_normalizado="ROBERTO ANTONIO JARAMILLO OSPINA",
+    )
+    h_rep = HallazgoEnriquecido(
+        parametro="representante legal",
+        valor="VALERIA MONTOYA DUQUE",
+        confianza=0.98,
+        metodo=MetodoExtraccion.SPATIAL_VECTOR,
+        evidencias=[ev_rep],
+        valor_normalizado="VALERIA MONTOYA DUQUE",
+    )
+    l1_entry = L1DocumentEntry(
+        pdf_hash=test_hash,
+        pipeline_version="2.2",
+        status=EstadoCobertura.COMPLETE,
+        paginas_totales=1,
+        paginas_completadas=1,
+        paginas_pendientes=[],
+        resultados_por_pagina=[],
+        indice_asociativo={
+            "arrendador": [ev_arr],
+            "representante legal": [ev_rep],
+        },
+        hallazgos_previos=[h_arr, h_rep],
+    )
+    set_l1_cache(test_hash, l1_entry)
+
+    output = process_chat_query(
+        pdf_hash=test_hash,
+        pregunta="¿Cuáles son las partes y representantes identificados?",
+    )
+
+    assert "[Página 1]" in output.citas
+    assert len(output.evidencias_relacionadas) >= 1
+    assert "ROBERTO ANTONIO JARAMILLO OSPINA" in output.respuesta
+    assert "VALERIA MONTOYA DUQUE" in output.respuesta
+

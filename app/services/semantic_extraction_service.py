@@ -18,6 +18,8 @@ SYNONYMS_MAP = {
         "total a pagar",
         "gran total",
         "total factura",
+        "canon",
+        "canon mensual",
     ],
     "subtotal": [
         "subtotal",
@@ -82,10 +84,47 @@ SYNONYMS_MAP = {
     ],
     "representante legal": [
         "representante legal",
+        "rep legal",
+        "rep. legal",
         "representado legalmente",
         "representada legalmente",
         "representante",
         "apoderado",
+        "apoderada",
+    ],
+    "arrendador": [
+        "arrendador",
+        "el arrendador",
+        "parte arrendadora",
+        "propietario",
+        "locador",
+    ],
+    "arrendatario": [
+        "arrendatario",
+        "arrendataria",
+        "la arrendataria",
+        "el arrendatario",
+        "inquilino",
+        "parte arrendataria",
+        "locatario",
+    ],
+    "contratante": [
+        "contratante",
+        "el contratante",
+        "parte contratante",
+    ],
+    "contratista": [
+        "contratista",
+        "el contratista",
+        "parte contratista",
+    ],
+    "notario": [
+        "notario",
+        "notaria",
+        "notario publico",
+        "notaria tercera",
+        "notaria primera",
+        "notaria segunda",
     ],
 }
 

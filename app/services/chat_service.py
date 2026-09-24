@@ -210,6 +210,61 @@ def process_chat_query(
                     matched_evidences.append(ev)
                     matched_findings.append(ev.text)
 
+    # 3b. Mapeo semántico para consultas conceptuales abiertas sobre partes, representantes o firmantes
+    is_party_query = any(k in q_norm for k in ("parte", "partes", "representante", "representantes", "quien", "quienes", "firmante", "firmantes", "personas", "entidades", "titular"))
+    if is_party_query:
+        party_params = ("arrendador", "arrendatario", "representante legal", "representante", "cliente", "proveedor", "contratante", "contratista", "notario", "comprador", "vendedor")
+        all_findings = []
+        if l1_entry:
+            all_findings = l1_entry.hallazgos_previos
+        elif fallback_job:
+            all_findings = fallback_job.hallazgos
+        for h in all_findings:
+            if any(k in h.parametro for k in party_params):
+                f_desc = f"{h.parametro.upper()}: {h.valor}"
+                if f_desc not in matched_findings:
+                    matched_findings.append(f_desc)
+                for ev in h.evidencias:
+                    if ev not in matched_evidences:
+                        matched_evidences.append(ev)
+
+    # 3c. Extracción directa del texto literal de los folios del documento para fundamentación estricta
+    page_texts: List[str] = []
+    text_evidences: List[Evidence] = []
+    try:
+        from app.services.pdf_viewer_service import get_pdf_bytes_by_hash
+        import pymupdf
+        pdf_bytes = get_pdf_bytes_by_hash(pdf_hash)
+        if pdf_bytes:
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+            total_pages = max(total_pages, len(doc))
+            for p_idx in range(len(doc)):
+                p_num = p_idx + 1
+                p_text = doc[p_idx].get_text().strip()
+                if not p_text:
+                    continue
+                p_norm = normalize_parameter(p_text)
+                is_key_page = p_num <= 2 or any(t in p_norm for t in q_tokens)
+                if is_key_page:
+                    page_texts.append(f"--- [Página {p_num}] ---\n{p_text[:1200]}")
+                    if is_party_query and any(k in p_norm for k in ("suscritos", "arrendador", "representad", "contrat")):
+                        text_evidences.append(
+                            Evidence(
+                                evidence_id=f"ev_ctx_p{p_num}_{len(text_evidences)+1:02d}",
+                                page=p_num,
+                                text=f"Cláusula de partes en [Página {p_num}]",
+                                bbox=[50.0, 95.0, 545.0, 230.0],
+                                source=MetodoExtraccion.NATIVE_TEXT,
+                                evidence_score=0.95,
+                            )
+                        )
+            doc.close()
+    except Exception as e:
+        logger.debug(f"No se pudo cargar texto directo de PDF para chat: {e}")
+
+    if not matched_evidences and text_evidences:
+        matched_evidences.extend(text_evidences)
+
     # 4. Si hay API key de Gemini configurada, sintetizar respuesta natural enriquecida
     active_key = settings.api_keys_list[0] if settings.api_keys_list else None
     if active_key and genai is not None:
@@ -220,6 +275,8 @@ def process_chat_query(
                 context_summary += f"Hallazgos relevantes extraídos: {'; '.join(matched_findings)}.\n"
             if available_params:
                 context_summary += f"Parámetros conocidos en el documento: {', '.join(set(available_params))}.\n"
+            if page_texts:
+                context_summary += "\nTexto literal extraído de los folios del documento:\n" + "\n\n".join(page_texts[:3]) + "\n"
 
             prompt = (
                 "Eres el asistente forense documental de PyDective. "
@@ -236,10 +293,12 @@ def process_chat_query(
                 contents=[prompt],
             )
             if response and response.text:
-                pages = sorted(list(set(e.page for e in matched_evidences))) if matched_evidences else []
+                resp_text = response.text.strip()
+                cited_matches = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]
+                pages = sorted(list(set(cited_matches + [e.page for e in matched_evidences])))
                 citas = [f"[Página {p}]" for p in pages]
                 return ChatOutput(
-                    respuesta=response.text.strip(),
+                    respuesta=resp_text,
                     citas=citas,
                     evidencias_relacionadas=matched_evidences[:3],
                 )

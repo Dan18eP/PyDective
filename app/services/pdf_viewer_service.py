@@ -39,6 +39,10 @@ def get_pdf_bytes_by_hash(pdf_hash: str) -> Optional[bytes]:
     if fixtures_dir.exists():
         candidate_paths.extend(fixtures_dir.glob("*.pdf"))
 
+    fixtures_100_dir = BASE_DIR.parent / "tests" / "fixtures_100"
+    if fixtures_100_dir.exists():
+        candidate_paths.extend(fixtures_100_dir.glob("*.pdf"))
+
     for cand in candidate_paths:
         if cand.exists():
             data = cand.read_bytes()

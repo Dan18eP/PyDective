@@ -15,6 +15,7 @@ def reset_caches_and_stores(monkeypatch):
     """
     monkeypatch.setattr(settings, "GEMINI_API_KEYS", "")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "gemini")
     in_memory_lru.clear()
     render_cache.clear()
     MOCK_RESULTS_STORE.clear()

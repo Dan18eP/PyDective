@@ -265,7 +265,23 @@ def process_chat_query(
     if not matched_evidences and text_evidences:
         matched_evidences.extend(text_evidences)
 
-    # 4. Síntesis conversacional vía proveedor configurado (Gemini Cloud o LLM Local en CPU)
+    # 4. Modo de síntesis forense: Si no se encontró evidencia, declinación natural y fluida (Cero-Alucinación)
+    if not matched_evidences:
+        resumen_disponible = f" ({', '.join(list(set(available_params))[:4])})" if available_params else ""
+        respuesta = (
+            f"Tras examinar detenidamente los folios del documento, se constató que el dato o concepto solicitado "
+            f"('{concepto_limpio}') no figura registrado en ninguna de las páginas analizadas."
+        )
+        if available_params:
+            respuesta += f" Entre los datos validados y disponibles en el expediente se encuentran: {', '.join(list(set(available_params))[:5])}."
+
+        return ChatOutput(
+            respuesta=respuesta,
+            citas=[],
+            evidencias_relacionadas=[],
+        )
+
+    # 5. Síntesis conversacional vía proveedor configurado (Gemini Cloud o LLM Local en CPU)
     from app.services.providers import get_llm_provider
     llm_provider = get_llm_provider()
     if llm_provider.is_available():
@@ -296,6 +312,8 @@ def process_chat_query(
                 cited_matches = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]
                 pages = sorted(list(set(cited_matches + [e.page for e in matched_evidences])))
                 citas = [f"[Página {p}]" for p in pages]
+                if citas and not any(c in resp_text for c in citas):
+                    resp_text = f"{resp_text} ({', '.join(citas)})"
                 return ChatOutput(
                     respuesta=resp_text,
                     citas=citas,
@@ -303,22 +321,6 @@ def process_chat_query(
                 )
         except Exception as e:
             logger.warning(f"Fallback a síntesis local tras error en {llm_provider.name}: {e}")
-
-    # 5. Modo de síntesis local: Si no se encontró evidencia, declinación natural y fluida
-    if not matched_evidences:
-        resumen_disponible = f" ({', '.join(list(set(available_params))[:4])})" if available_params else ""
-        respuesta = (
-            f"Tras examinar detenidamente los folios del documento, se constató que el dato o concepto solicitado "
-            f"('{concepto_limpio}') no figura registrado en ninguna de las páginas analizadas."
-        )
-        if available_params:
-            respuesta += f" Entre los datos validados y disponibles en el expediente se encuentran: {', '.join(list(set(available_params))[:5])}."
-
-        return ChatOutput(
-            respuesta=respuesta,
-            citas=[],
-            evidencias_relacionadas=[],
-        )
 
     # 6. Hallazgos encontrados: respuesta fundamentada con citas obligatorias [Página X]
     matched_evidences.sort(key=lambda e: e.evidence_score, reverse=True)

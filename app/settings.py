@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         description="Model identifier for local inference (e.g. qwen2.5:3b, llama3.2:3b, kev)"
     )
     LOCAL_LLM_TIMEOUT_SECONDS: float = Field(
-        default=30.0,
+        default=60.0,
         description="HTTP request timeout for local LLM inference in seconds"
     )
 

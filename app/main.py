@@ -62,6 +62,7 @@ from app.services.image_service import (
     classify_image_semantics,
     catalog_page_images,
 )
+from app.services.ocr_service import extract_page_ocr
 from app.services.gemini_service import (
     invoke_gemini_multimodal_page,
 )
@@ -488,6 +489,19 @@ async def procesar_documento(
 
                 # 1. Extracción espacial determinista nativa (Cero-IA) SIEMPRE que haya texto en la página
                 page_text = page.get_text()
+
+                # Salvaguarda OCR-01 / OCR-02: Para páginas clasificadas como NEEDS_AI sin texto nativo, invocar OCR local autónomo
+                if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
+                    ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                    if ocr_full_text.strip():
+                        page_text = ocr_full_text
+                        for b in ocr_boxes:
+                            try:
+                                rect = pymupdf.Rect(b["bbox"])
+                                page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                            except Exception:
+                                pass
+
                 if len(page_text.strip()) > 0:
                     t_r = time.perf_counter()
                     page_findings = extract_spatial_key_values(page, canonical_params)

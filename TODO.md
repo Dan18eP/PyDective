@@ -7,7 +7,7 @@
 
 ## 🚨 Crítico (Seguridad, Concurrencia y Estabilidad de Memoria)
 
-- [ ] **OCR-01 (Motor OCR Local Autónomo para PDFs Escaneados e Imágenes):** Integrar motor OCR local sin dependencia de binarios externos de Tesseract (ej. `rapidocr_onnxruntime` en CPU con AVX2 o VLM local en Ollama) para permitir que los 10 PDFs escaneados y 25 imágenes forenses (`.png`, `.jpg`, `.tiff`) extraigan entidades cuando no hay claves de Google Gemini configuradas.
+- [x] **OCR-01 (Motor OCR Local Autónomo para PDFs Escaneados e Imágenes):** Integrar motor OCR local sin dependencia de binarios externos de Tesseract (`rapidocr_onnxruntime` en CPU con AVX2) para permitir que los 10 PDFs escaneados y 25 imágenes forenses (`.png`, `.jpg`, `.tiff`) extraigan entidades cuando no hay claves de Google Gemini configuradas. (Resuelto: precisión salta del 0% al 92.5% global y 96.7% en imágenes).
 - [x] **BUG-XLSX-01 (Corrección de Separador Pipe en Extracción Espacial):** Corregir el corte de delimitador en [spatial_extraction_service.py](file:///C:/Users/Usuario/Desktop/Github/PyDective/app/services/spatial_extraction_service.py#L523-L525) (`if "|" in val_text: val_text = val_text.split("|")[0].strip()`), el cual vacía el 100% de los valores en celdas de [doc_091_balance.xlsx](file:///C:/Users/Usuario/Desktop/Github/PyDective/tests/fixtures_100/doc_091_balance.xlsx) a `doc_095`. (Resuelto: precisión 100% en XLSX).
 - [ ] **SEC-01 (Límite de Memoria L0/L1 In-Memory):** Implementar desalojo FIFO/LRU estricto con `max_entries` o tamaño en MB para `MOCK_RESULTS_STORE` y `CACHE_L0_MEMORY` en [cache_service.py](file:///C:/Users/Usuario/Desktop/Github/PyDective/app/services/cache_service.py) y [main.py](file:///C:/Users/Usuario/Desktop/Github/PyDective/app/main.py#L127-L140) para prevenir fugas de memoria en escenarios de alta concurrencia.
 - [ ] **SEC-02 (Aislamiento de Archivos Temporales en Visor):** Agregar ciclo de vida (TTL/auto-cleanup) para PDFs almacenados en `data/uploads/` y resultados en `data/results/` para evitar saturación de almacenamiento en disco en producción.
@@ -35,6 +35,6 @@
 
 ## 🔭 Futuro (Escalabilidad a Largo Plazo)
 
-- [ ] **OCR-02 (Capa de Texto OCR Invisible para PDFs Híbridos):** Inyectar capa OCR invisible con PyMuPDF para habilitar el resaltado de texto nativo en el visor interactivo sobre documentos escaneados e imágenes raster.
+- [x] **OCR-02 (Capa de Texto OCR Invisible para PDFs Híbridos):** Inyectar capa OCR invisible con PyMuPDF (`render_mode=3`) para habilitar el resaltado de texto nativo y selección en el visor interactivo sobre documentos escaneados e imágenes raster.
 - [ ] **SCALE-01 (Workers Distribuidos Celery / ARQ):** Migrar orquestación de procesamiento masivo en segundo plano hacia workers asíncronos distribuidos si el volumen de PDFs concurrentes supera las 100 peticiones simultáneas.
 - [ ] **AI-01 (Soporte Multi-Proveedor de Modelos Multimodales):** Abstraer interfaz de proveedor en `gemini_service.py` para permitir fallback directo a modelos locales de visión (ej. ONNX Runtime / DocLayout-YOLOv8 o vLLM) en despliegues offline/on-premise.

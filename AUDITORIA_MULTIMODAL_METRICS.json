@@ -4,60 +4,55 @@
     "classification_distribution": {
       "needs_ai": 10
     },
-    "accuracy": "0/30 (0.0%)",
+    "accuracy": "21/30 (70.0%)",
     "visual_accuracy": "10/10 (100.0%)",
-    "avg_latency_ms": 10.46,
-    "encoding_issues_count": 10,
+    "avg_latency_ms": 12.36,
+    "encoding_issues_count": 9,
     "encoding_issues": [
       [
         "doc_051_escaneo.pdf",
-        "fecha",
-        "2026-01-15"
-      ],
-      [
-        "doc_052_escaneo.pdf",
-        "fecha",
-        "2026-03-20"
+        "notario",
+        "ROBERTO ANTONIO JARAMILLO OSPINA"
       ],
       [
         "doc_053_escaneo.pdf",
-        "fecha",
-        "2026-04-15"
+        "notario",
+        "CARLOS EDUARDO RESTREPO MEJÍA"
       ],
       [
         "doc_054_escaneo.pdf",
-        "fecha",
-        "2026-05-22"
+        "notario",
+        "MARÍA CONSUELO GÓMEZ ÁLVAREZ"
       ],
       [
         "doc_055_escaneo.pdf",
-        "fecha",
-        "2026-06-30"
+        "notario",
+        "ALEJANDRO VALENCIA HENAO"
       ],
       [
         "doc_056_escaneo.pdf",
-        "fecha",
-        "2026-08-10"
+        "notario",
+        "DIANA PATRICIA CÁRDENAS BOTERO"
       ],
       [
         "doc_057_escaneo.pdf",
-        "fecha",
-        "2026-09-23"
+        "notario",
+        "JUAN GUILLERMO ZAPATA RIVERA"
       ],
       [
         "doc_058_escaneo.pdf",
-        "fecha",
-        "2026-11-05"
+        "notario",
+        "LAURA CRISTINA PEÑA CASTILLO"
       ],
       [
         "doc_059_escaneo.pdf",
-        "fecha",
-        "2026-01-15"
+        "notario",
+        "ANDRÉS FELIPE SALAZAR LONDOÑO"
       ],
       [
         "doc_060_escaneo.pdf",
-        "fecha",
-        "2026-03-20"
+        "notario",
+        "GLORIA INÉS VELÁSQUEZ TORRES"
       ]
     ]
   },
@@ -66,60 +61,15 @@
     "classification_distribution": {
       "needs_ai": 10
     },
-    "accuracy": "0/30 (0.0%)",
+    "accuracy": "29/30 (96.7%)",
     "visual_accuracy": "10/10 (100.0%)",
-    "avg_latency_ms": 26.47,
-    "encoding_issues_count": 10,
+    "avg_latency_ms": 30.81,
+    "encoding_issues_count": 1,
     "encoding_issues": [
       [
-        "doc_061_img.png",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_062_img.png",
-        "nit",
-        "900543210-8"
-      ],
-      [
-        "doc_063_img.png",
-        "nit",
-        "830123987-1"
-      ],
-      [
-        "doc_064_img.png",
-        "nit",
-        "890900123-5"
-      ],
-      [
-        "doc_065_img.png",
-        "nit",
-        "900876543-2"
-      ],
-      [
-        "doc_066_img.png",
-        "nit",
-        "901234567-9"
-      ],
-      [
         "doc_067_img.png",
-        "nit",
-        "860001234-4"
-      ],
-      [
-        "doc_068_img.png",
-        "nit",
-        "800154890-1"
-      ],
-      [
-        "doc_069_img.png",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_070_img.png",
-        "nit",
-        "900543210-8"
+        "total",
+        "4500.00"
       ]
     ]
   },
@@ -128,60 +78,15 @@
     "classification_distribution": {
       "needs_ai": 10
     },
-    "accuracy": "0/30 (0.0%)",
+    "accuracy": "29/30 (96.7%)",
     "visual_accuracy": "10/10 (100.0%)",
-    "avg_latency_ms": 11.79,
-    "encoding_issues_count": 10,
+    "avg_latency_ms": 13.33,
+    "encoding_issues_count": 1,
     "encoding_issues": [
       [
-        "doc_071_img.jpg",
-        "nit",
-        "830123987-1"
-      ],
-      [
-        "doc_072_img.jpg",
-        "nit",
-        "890900123-5"
-      ],
-      [
-        "doc_073_img.jpg",
-        "nit",
-        "900876543-2"
-      ],
-      [
         "doc_074_img.jpg",
-        "nit",
-        "901234567-9"
-      ],
-      [
-        "doc_075_img.jpg",
-        "nit",
-        "860001234-4"
-      ],
-      [
-        "doc_076_img.jpg",
-        "nit",
-        "800154890-1"
-      ],
-      [
-        "doc_077_img.jpg",
-        "nit",
-        "901884231-3"
-      ],
-      [
-        "doc_078_img.jpg",
-        "nit",
-        "900543210-8"
-      ],
-      [
-        "doc_079_img.jpg",
-        "nit",
-        "830123987-1"
-      ],
-      [
-        "doc_080_img.jpg",
-        "nit",
-        "890900123-5"
+        "total",
+        "4500.00"
       ]
     ]
   },
@@ -190,35 +95,15 @@
     "classification_distribution": {
       "needs_ai": 5
     },
-    "accuracy": "0/15 (0.0%)",
+    "accuracy": "14/15 (93.3%)",
     "visual_accuracy": "5/5 (100.0%)",
-    "avg_latency_ms": 31.61,
-    "encoding_issues_count": 5,
+    "avg_latency_ms": 39.07,
+    "encoding_issues_count": 1,
     "encoding_issues": [
       [
         "doc_081_img.tiff",
-        "nit",
-        "900876543-2"
-      ],
-      [
-        "doc_082_img.tiff",
-        "nit",
-        "901234567-9"
-      ],
-      [
-        "doc_083_img.tiff",
-        "nit",
-        "860001234-4"
-      ],
-      [
-        "doc_084_img.tiff",
-        "nit",
-        "800154890-1"
-      ],
-      [
-        "doc_085_img.tiff",
-        "nit",
-        "901884231-3"
+        "total",
+        "4500.00"
       ]
     ]
   },
@@ -229,7 +114,7 @@
     },
     "accuracy": "15/15 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 34.28,
+    "avg_latency_ms": 35.15,
     "encoding_issues_count": 0,
     "encoding_issues": []
   },
@@ -240,7 +125,7 @@
     },
     "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 27.65,
+    "avg_latency_ms": 44.11,
     "encoding_issues_count": 0,
     "encoding_issues": []
   },
@@ -251,7 +136,7 @@
     },
     "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 5.86,
+    "avg_latency_ms": 6.05,
     "encoding_issues_count": 0,
     "encoding_issues": []
   }

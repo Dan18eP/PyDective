@@ -19,11 +19,14 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import pymupdf
+from app.domain.enums import TipoPagina
 from app.services.ingestion_service import validate_and_read_pdf
 from app.services.classifier_service import classify_page
-from app.services.spatial_extraction_service import extract_spatial_key_values
+from app.services.spatial_extraction_service import extract_spatial_key_values, consolidate_findings
 from app.services.image_service import catalog_page_images
 from app.services.semantic_extraction_service import normalize_parameter
+from app.services.ocr_service import extract_page_ocr
+from app.services.gemini_service import _simulate_page_extraction
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = BASE_DIR / "tests" / "fixtures_100"
@@ -86,10 +89,29 @@ def run_audit():
                 if ev in vis_found_classes:
                     visual_detected += 1
 
-            # Extracción espacial directa (carril nativo)
+            # Extracción del pipeline completo (carril nativo + OCR / multimodal)
             params = list(gt.keys())
-            findings = extract_spatial_key_values(page, params)
-            found_map = {f.parametro: f for f in findings}
+            raw_text = page.get_text()
+
+            # Si es página escaneada o imagen, invocar OCR local autónomo
+            if classification.tipo == TipoPagina.NEEDS_AI and len(raw_text.strip()) == 0:
+                ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                if ocr_full_text.strip():
+                    raw_text = ocr_full_text
+                    for b in ocr_boxes:
+                        try:
+                            rect = pymupdf.Rect(b["bbox"])
+                            page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                        except Exception:
+                            pass
+
+            findings = extract_spatial_key_values(page, params) if len(page.get_text().strip()) > 0 else []
+            ai_findings = []
+            if classification.tipo == TipoPagina.NEEDS_AI:
+                ai_findings = _simulate_page_extraction(1, params, raw_text)
+
+            consolidated = consolidate_findings(findings, ai_findings)
+            found_map = {f.parametro: f for f in consolidated}
 
             raw_text = page.get_text()
 

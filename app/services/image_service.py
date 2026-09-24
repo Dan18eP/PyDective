@@ -140,6 +140,17 @@ def classify_image_semantics(
     local_text = (nearby_text if nearby_text else page_text).lower()
     full_text = f"{nearby_text} {page_text}".lower()
 
+    # Código de barras explícito en cabecera o documento
+    has_barcode_text = any(
+        kw in local_text
+        for kw in ("codigo de barras", "código de barras", "barcode", "radicado oficial", "rad-")
+    ) or any(
+        kw in full_text
+        for kw in ("codigo de barras", "código de barras", "barcode")
+    )
+    if not is_vector and has_barcode_text and not any(k in local_text for k in ("grafic", "gráfico", "diagrama", "figura")):
+        return "codigo_barras"
+
     # 1. Logotipo o cabecera institucional
     if bbox[1] <= 60 and y_center <= 160 and h <= 160:
         return "logotipo"
@@ -178,20 +189,35 @@ def classify_image_semantics(
         if has_signature_text or (not is_vector and y_center > 400 and w <= 220 and h <= 80):
             return "firma_manuscrita"
 
-    # 5. Código de barras (raster alargado horizontal)
-    if not is_vector:
-        has_barcode_text = any(
-            kw in full_text for kw in ("radicado", "codigo de barras", "código de barras", "barcode", "rad-", "barras")
+    # 5. Si el contexto local describe explícitamente gráficos financieros o diagramas (EVALUAR ANTES DE CÓDIGO DE BARRAS)
+    has_diagram_keywords = any(
+        k in local_text
+        for k in (
+            "presupuesto", "financiero", "diagrama", "flujo", "arquitectura",
+            "cronograma", "distribución porcentual", "distribucion porcentual",
+            "figura", "fig.", "gráfico", "grafico", "estadística", "estadistica",
+            "tendencia", "proyección", "proyeccion", "pastel", "torta"
         )
-        if (aspect_ratio >= 2.2 and h <= 100 and w <= 350) or has_barcode_text:
-            return "codigo_barras"
-
-    # Si el contexto local describe explícitamente gráficos financieros o diagramas
-    has_diagram_keywords = any(k in local_text for k in ("presupuesto", "financiero", "diagrama", "flujo", "arquitectura", "cronograma", "distribución porcentual", "distribucion porcentual"))
-    if has_diagram_keywords or re.search(r"(?<!foto)gr[aá]fico\b", local_text):
+    ) or bool(re.search(r"(?<!foto)gr[aá]fico\b", local_text))
+    if has_diagram_keywords:
         return "diagrama"
 
-    # 6. Fotografía pericial o técnica
+    # 6. Código de barras (raster alargado horizontal)
+    if not is_vector:
+        # Solo palabras clave explícitas de código de barras / radicación (NO la palabra genérica "barras")
+        has_barcode_text = any(
+            kw in local_text
+            for kw in ("codigo de barras", "código de barras", "barcode", "radicado oficial", "rad-")
+        ) or any(
+            kw in full_text
+            for kw in ("codigo de barras", "código de barras", "barcode")
+        )
+        is_barcode_shape = (aspect_ratio >= 2.2 and h <= 100 and w <= 350)
+        # Excluir si el texto cercano menciona gráficos o figuras
+        if (has_barcode_text or is_barcode_shape) and not any(k in local_text for k in ("grafic", "gráfico", "diagrama", "figura")):
+            return "codigo_barras"
+
+    # 7. Fotografía pericial o técnica
     if not is_vector:
         page_header = page_text.lstrip()[:200].lower()
         has_annex_photo_header = any(k in page_header for k in ("anexo fotográfico", "anexo fotografico", "registro fotográfico", "acta de inspección", "acta de inspeccion"))
@@ -201,7 +227,7 @@ def classify_image_semantics(
         if (w >= 180 and h >= 100) and has_photo_text:
             return "fotografia"
 
-    # 7. Diagrama / Gráfico general por defecto
+    # 8. Diagrama / Gráfico general por defecto
     return "diagrama"
 
 
@@ -239,12 +265,28 @@ def catalog_page_images(
             if is_qr and decoded:
                 img.contenido_decodificado = decoded
 
+        # Detección de caption o descripción textual adyacente
+        caption = None
+        for line in nearby_text.splitlines():
+            line_str = line.strip()
+            if re.match(r"^(figura|gr[aá]fico|grafico|diagrama|tabla|ilustraci[oó]n|imagen)\b", line_str, re.IGNORECASE):
+                caption = line_str
+                break
+
         img.clasificacion_semantica = classify_image_semantics(
             img,
             page_text=full_text,
             nearby_text=nearby_text,
             is_qr_detected=is_qr,
         )
+
+        if caption:
+            img.descripcion_visual = caption
+        elif nearby_text:
+            first_sentence = nearby_text.split(".")[0].strip()
+            img.descripcion_visual = f"{img.clasificacion_semantica}: {first_sentence[:120]}"
+        else:
+            img.descripcion_visual = img.clasificacion_semantica
 
     # Si ningún elemento fue catalogado como QR, evaluar salvaguarda de escaneo completo
     has_qr = any(i.clasificacion_semantica == "codigo_qr" for i in images)

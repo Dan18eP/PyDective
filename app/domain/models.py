@@ -45,6 +45,7 @@ class MetadatoImagen(BaseModel):
     area_ratio: float
     clasificacion_semantica: Optional[str] = None
     contenido_decodificado: Optional[str] = None
+    descripcion_visual: Optional[str] = None
 
 
 class ResultadoPagina(BaseModel):

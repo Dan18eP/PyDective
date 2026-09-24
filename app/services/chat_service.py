@@ -13,6 +13,7 @@ from app.domain.models import ChatInput, ChatOutput, ChatMessage, Evidence, Meta
 from app.domain.errors import DocumentoNoEncontradoOExpiradoError
 from app.domain.enums import MetodoExtraccion
 from app.services.cache_service import get_l1_cache, L1DocumentEntry
+from app.services.markdown_service import get_or_create_page_indexed_markdown
 from app.services.semantic_extraction_service import normalize_parameter
 from app.settings import settings
 
@@ -49,12 +50,16 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
     descripcion = ""
 
     # Mapeo de términos de consulta a clasificaciones semánticas
-    is_barcode = any(kw in query_norm for kw in ("codigo de barras", "codigo barras", "barcode", "barras", "radicado"))
+    is_chart = any(kw in query_norm for kw in ("grafico", "gráfica", "grafica", "diagrama", "pastel", "barras comparativo", "figura", "ilustracion", "ilustración"))
+    is_barcode = any(kw in query_norm for kw in ("codigo de barras", "código de barras", "codigo barras", "código barras", "barcode", "radicado oficial", "rad-"))
+    # Si la consulta menciona explícitamente gráfico o diagrama de barras, es gráfico, no código de barras
+    if any(k in query_norm for k in ("grafico", "gráfico", "diagrama", "figura")):
+        is_barcode = False
+
     is_qr = any(kw in query_norm for kw in ("codigo qr", "qr", "cufe"))
     is_signature = any(kw in query_norm for kw in ("firma", "firmas", "firmado", "rubrica", "firmantes"))
     is_seal = any(kw in query_norm for kw in ("sello", "sellos", "notaria", "notarial", "autenticado", "estampilla"))
     is_photo = any(kw in query_norm for kw in ("foto", "fotografia", "fotografias", "datacenter", "servidor"))
-    is_chart = any(kw in query_norm for kw in ("grafico", "grafica", "diagrama", "pastel", "barras comparativo"))
 
     found_pages: List[int] = []
     item_type = ""
@@ -88,7 +93,9 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
                 if p_num not in found_pages:
                     found_pages.append(p_num)
                 txt = f"Elemento visual detectado: {item_type}"
-                if v.contenido_decodificado:
+                if v.descripcion_visual:
+                    txt += f" ({v.descripcion_visual})"
+                elif v.contenido_decodificado:
                     txt += f" (contenido decodificado: '{v.contenido_decodificado}')"
                 txt += f" en bbox {v.bbox}"
                 evidencias.append(
@@ -265,7 +272,94 @@ def process_chat_query(
     if not matched_evidences and text_evidences:
         matched_evidences.extend(text_evidences)
 
-    # 4. Modo de síntesis forense: Si no se encontró evidencia, declinación natural y fluida (Cero-Alucinación)
+    # 4. Modo conversacional con LLM multimodal/texto completo (Gemini 2.5/3.1 Flash Lite o Local)
+    from app.services.providers import get_llm_provider
+    llm_provider = get_llm_provider()
+
+    # Si hay un proveedor LLM disponible, evaluar el documento completo indexado en RAM
+    if llm_provider.is_available():
+        markdown_doc = get_or_create_page_indexed_markdown(pdf_hash)
+        if markdown_doc:
+            try:
+                sys_instruction = (
+                    "Eres un asistente experto analizando documentos estructurados. "
+                    "Tu objetivo es responder las solicitudes del usuario basándote exclusivamente en el contexto provisto.\n\n"
+                    "REGLAS DE OBLIGATORIO CUMPLIMIENTO:\n"
+                    "1. Debes identificar en qué número de página exacta se encuentra la información utilizando como referencia única las etiquetas ocultas del documento: `<!-- INICIO_PAGINA_X -->`.\n"
+                    "2. Tu respuesta debe ser breve, directa y estructurada, indicando la página y el dato exacto hallado (ej: '[Página X]').\n"
+                    "3. Si el usuario te pregunta algo que no se encuentra en el documento, responde indicando que la información no está disponible."
+                )
+                prompt = (
+                    "--- INICIO DEL DOCUMENTO ---\n"
+                    f"{markdown_doc}\n"
+                    "--- FIN DEL DOCUMENTO ---\n\n"
+                    "SOLICITUD DEL USUARIO:\n"
+                    f"{pregunta}"
+                )
+
+                resp_text = llm_provider.generate_chat_response(
+                    prompt=prompt,
+                    system_instruction=sys_instruction,
+                )
+
+                if resp_text:
+                    # Detectar si la información no está disponible
+                    lower_resp = resp_text.lower()
+                    is_unavailable = any(
+                        p in lower_resp for p in (
+                            "no está disponible", "no esta disponible", "no se encuentra",
+                            "no figura", "no aparece", "no hay registro", "no se menciona"
+                        )
+                    )
+
+                    # Extraer números de páginas citadas
+                    cited_pages = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]
+                    if not cited_pages:
+                        cited_pages = [int(m) for m in re.findall(r"Página\s+(\d+)", resp_text, re.IGNORECASE)]
+
+                    if is_unavailable and not cited_pages:
+                        return ChatOutput(
+                            respuesta=resp_text,
+                            citas=[],
+                            evidencias_relacionadas=[],
+                        )
+
+                    pages = sorted(list(set(cited_pages + [e.page for e in matched_evidences])))
+                    citas = [f"[Página {p}]" for p in pages]
+                    if citas and not any(c in resp_text for c in citas):
+                        resp_text = f"{resp_text} ({', '.join(citas)})"
+
+                    # Mapear evidencias para resaltar en el visor PDF interactivo
+                    related_evidences = [e for e in matched_evidences if e.page in pages]
+                    if not related_evidences and pages:
+                        for res in resultados_paginas:
+                            if getattr(res, "numero_pagina", None) in pages:
+                                for ev in getattr(res, "evidencias", []):
+                                    if ev not in related_evidences:
+                                        related_evidences.append(ev)
+                                        break
+                    if not related_evidences and pages:
+                        for p in pages[:2]:
+                            related_evidences.append(
+                                Evidence(
+                                    evidence_id=f"ev_p{p}_llm",
+                                    page=p,
+                                    text=f"Respuesta fundamentada en [Página {p}]",
+                                    bbox=[50.0, 100.0, 500.0, 150.0],
+                                    source=MetodoExtraccion.NATIVE_TEXT,
+                                    evidence_score=0.95,
+                                )
+                            )
+
+                    return ChatOutput(
+                        respuesta=resp_text,
+                        citas=citas,
+                        evidencias_relacionadas=related_evidences[:3],
+                    )
+            except Exception as e:
+                logger.warning(f"Error en consulta conversacional con {llm_provider.name}: {e}")
+
+    # 5. Modo de síntesis forense sin LLM activo (Cero-Alucinación determinista)
     if not matched_evidences:
         resumen_disponible = f" ({', '.join(list(set(available_params))[:4])})" if available_params else ""
         respuesta = (
@@ -281,48 +375,7 @@ def process_chat_query(
             evidencias_relacionadas=[],
         )
 
-    # 5. Síntesis conversacional vía proveedor configurado (Gemini Cloud o LLM Local en CPU)
-    from app.services.providers import get_llm_provider
-    llm_provider = get_llm_provider()
-    if llm_provider.is_available():
-        try:
-            context_summary = f"Total páginas del documento: {total_pages}.\n"
-            if matched_findings:
-                context_summary += f"Hallazgos relevantes extraídos: {'; '.join(matched_findings)}.\n"
-            if available_params:
-                context_summary += f"Parámetros conocidos en el documento: {', '.join(set(available_params))}.\n"
-            if page_texts:
-                context_summary += "\nTexto literal extraído de los folios del documento:\n" + "\n\n".join(page_texts[:3]) + "\n"
-
-            sys_instruction = (
-                "Eres el asistente forense documental de PyDective. "
-                "Responde en español de forma fluida, precisa y profesional a la siguiente pregunta del usuario, "
-                "basándote exclusivamente en el contexto documental proporcionado.\n"
-                "REGLAS OBLIGATORIAS:\n"
-                "1. Si el dato existe, cítalo con la página exacta como [Página X].\n"
-                "2. Si el dato NO figura en el documento, indícalo de forma clara y amable indicando que no figura registrado, sin repetir la pregunta literalmente."
-            )
-            prompt = f"Contexto:\n{context_summary}\nPregunta: {pregunta}"
-
-            resp_text = llm_provider.generate_chat_response(
-                prompt=prompt,
-                system_instruction=sys_instruction,
-            )
-            if resp_text:
-                cited_matches = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", resp_text, re.IGNORECASE)]
-                pages = sorted(list(set(cited_matches + [e.page for e in matched_evidences])))
-                citas = [f"[Página {p}]" for p in pages]
-                if citas and not any(c in resp_text for c in citas):
-                    resp_text = f"{resp_text} ({', '.join(citas)})"
-                return ChatOutput(
-                    respuesta=resp_text,
-                    citas=citas,
-                    evidencias_relacionadas=matched_evidences[:3],
-                )
-        except Exception as e:
-            logger.warning(f"Fallback a síntesis local tras error en {llm_provider.name}: {e}")
-
-    # 6. Hallazgos encontrados: respuesta fundamentada con citas obligatorias [Página X]
+    # 6. Hallazgos encontrados en L1 sin LLM: respuesta fundamentada con citas obligatorias [Página X]
     matched_evidences.sort(key=lambda e: e.evidence_score, reverse=True)
     top_evidences = matched_evidences[:3]
 

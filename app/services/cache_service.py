@@ -21,6 +21,7 @@ class L1DocumentEntry(BaseModel):
     indice_asociativo: Dict[str, List[Evidence]] = Field(default_factory=dict)
     hallazgos_previos: List[HallazgoEnriquecido] = Field(default_factory=list)
     telemetria_original: Optional[TelemetriaDesagregada] = None
+    documento_markdown_indexado: Optional[str] = None
     timestamp: float = Field(default_factory=time.time)
 
 

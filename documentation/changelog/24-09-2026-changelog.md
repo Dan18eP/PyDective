@@ -19,3 +19,4 @@
 - [Thursday]-[24/09/2026]-[03:11]-[Brandon Carranza] : Fixed text clipping in invisible text layer and added generic name extraction heuristics for RapidOCR on challenging scanned PDFs (doc_051_escaneo.pdf).
 - [Thursday]-[24/09/2026]-[03:22]-[Brandon Carranza] : Updated frontend presets (+ Nombre / Titular, + Notario, + Valor Declarado, + Cliente) and enabled cross-platform Linux / POSIX support for installer, launcher, and clipboard API fallback.
 - [Thursday]-[24/09/2026]-[03:34]-[Brandon Carranza] : Formulated and integrated ADR-006 (Dual Vision Engine Architecture and Exact Grounding) and ADR-007 (Cross-Platform Universal Bootstrap and Lifecycle Management).
+- [Thursday]-[24/09/2026]-[07:40]-[Brandon Carranza] : Implemented in-memory page-indexed markdown reader with PyMuPDF and MarkItDown, fixed chatbot LLM prompt gating, corrected false barcode identification for charts, and added descriptive visual context.

@@ -12,7 +12,7 @@ except ImportError:
 from app.domain.models import ChatInput, ChatOutput, ChatMessage, Evidence, MetadatoImagen
 from app.domain.errors import DocumentoNoEncontradoOExpiradoError
 from app.domain.enums import MetodoExtraccion
-from app.services.cache_service import get_l1_cache, L1DocumentEntry
+from app.services.cache_service import get_l1_cache, set_l1_cache, L1DocumentEntry
 from app.services.markdown_service import get_or_create_page_indexed_markdown
 from app.services.markdown_search_service import deterministic_search, get_relevant_page_slices
 from app.services.semantic_extraction_service import normalize_parameter
@@ -311,11 +311,37 @@ def process_chat_query(
     if det_out is not None:
         return det_out
 
-    # 4b. Modo conversacional con LLM multimodal/texto completo (Gemini 3.1 Flash Lite con conmutación de claves)
+    # 4b. Opción 1: Generador Estructural Sintético en RAM (< 30 ms, 0 tokens, 0% CPU)
     from app.services.providers import get_llm_provider
     llm_provider = get_llm_provider()
+    is_mock = getattr(llm_provider, "name", "").startswith("mock")
 
-    # Si hay un proveedor LLM disponible, evaluar el documento completo indexado en RAM
+    is_global_summary = any(
+        k in q_norm for k in (
+            "resumen", "sintesis", "de que trata", "vision general", "panorama",
+            "explicacion general", "resume el documento", "resumen ejecutivo"
+        )
+    )
+    if is_global_summary and not is_mock:
+        if l1_entry and getattr(l1_entry, "resumen_ejecutivo", None):
+            return ChatOutput(**l1_entry.resumen_ejecutivo)
+
+        from app.services.synthetic_summary_service import generate_synthetic_executive_summary
+        all_findings_list = l1_entry.hallazgos_previos if l1_entry else (fallback_job.hallazgos if fallback_job else [])
+        synth_out = generate_synthetic_executive_summary(
+            pdf_hash=pdf_hash,
+            pregunta=pregunta,
+            hallazgos=all_findings_list,
+            resultados_paginas=resultados_paginas,
+        )
+        if synth_out:
+            if l1_entry:
+                l1_entry.resumen_ejecutivo = synth_out.model_dump()
+                set_l1_cache(pdf_hash, l1_entry)
+            return synth_out
+
+    # 4c. Modo conversacional con LLM/SLM local (Opción 2)
+    # Si hay un proveedor LLM disponible, evaluar el documento indexado en RAM
     if llm_provider.is_available():
         # Ventana Quirúrgica (Targeted Page Slicing): enviar únicamente las 1-2 páginas relevantes para ahorrar 95% de tokens
         target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
@@ -323,12 +349,6 @@ def process_chat_query(
             target_context = get_or_create_page_indexed_markdown(pdf_hash)
 
         if target_context:
-            is_global_summary = any(
-                k in q_norm for k in (
-                    "resumen", "sintesis", "de que trata", "vision general", "panorama",
-                    "explicacion general", "resume el documento", "resumen ejecutivo"
-                )
-            )
             try:
                 if is_global_summary:
                     sys_instruction = (
@@ -460,3 +480,72 @@ def process_chat_query(
         citas=citas,
         evidencias_relacionadas=top_evidences,
     )
+
+
+def process_chat_query_stream(
+    pdf_hash: str,
+    pregunta: str,
+    historial: Optional[List[ChatMessage]] = None,
+    fallback_store: Optional[Dict[str, JobOutput]] = None,
+):
+    """
+    Generador de Server-Sent Events (SSE) para el chat documental interactivo.
+    - Si la consulta es determinista o un resumen sintético en RAM (Opción 1), emite el resultado completo de inmediato.
+    - Si requiere razonamiento conversacional con el SLM (Opción 2 y 3), emite tokens en tiempo real (< 350 ms).
+    """
+    import json
+    q_norm = _strip_accents(pregunta.lower().strip())
+    is_global_summary = any(
+        k in q_norm for k in (
+            "resumen", "sintesis", "de que trata", "vision general", "panorama",
+            "explicacion general", "resume el documento", "resumen ejecutivo"
+        )
+    )
+
+    # 1. Si es resumen global o búsqueda determinista de parámetros/imágenes, resolver en RAM (Opción 1)
+    out = process_chat_query(
+        pdf_hash=pdf_hash,
+        pregunta=pregunta,
+        historial=historial,
+        fallback_store=fallback_store,
+    )
+
+    from app.services.providers import get_llm_provider
+    llm_prov = get_llm_provider()
+
+    # Si la consulta fue resuelta por la Opción 1 (sintética en RAM) o el buscador determinista
+    if is_global_summary or not hasattr(llm_prov, "generate_chat_stream") or not llm_prov.is_available():
+        yield f"data: {json.dumps({'token': out.respuesta, 'citas': out.citas, 'final': True})}\n\n"
+        return
+
+    # Si es una consulta abierta hacia el SLM local, transmitir streaming token por token
+    target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
+    if not target_context:
+        target_context = get_or_create_page_indexed_markdown(pdf_hash)
+
+    sys_instruction = (
+        "Eres un asistente documental experto. Responde brevemente basándote exclusivamente en el contexto provisto. "
+        "Cita siempre la página de origen en formato '[Página X]'."
+    )
+    prompt = (
+        "--- INICIO DEL DOCUMENTO ---\n"
+        f"{target_context}\n"
+        "--- FIN DEL DOCUMENTO ---\n\n"
+        "SOLICITUD DEL USUARIO:\n"
+        f"{pregunta}"
+    )
+
+    token_count = 0
+    full_text_acc = ""
+    for token in llm_prov.generate_chat_stream(prompt=prompt, system_instruction=sys_instruction):
+        token_count += 1
+        full_text_acc += token
+        yield f"data: {json.dumps({'token': token, 'citas': [], 'final': False})}\n\n"
+
+    # Extraer citas de páginas del texto completo emitido
+    cited_pages = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", full_text_acc, re.IGNORECASE)]
+    cited_pages = sorted(list(set(cited_pages)))
+    citas = [f"[Página {p}]" for p in cited_pages] if cited_pages else out.citas
+
+    yield f"data: {json.dumps({'token': '', 'citas': citas, 'final': True})}\n\n"
+

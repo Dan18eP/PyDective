@@ -236,12 +236,16 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
                     vis = catalog_page_images(page, catalogar_imagenes=True)
                     page_text = page.get_text()
 
-                    # Salvaguarda OCR local autónomo para escaneos o imágenes
+                    # Salvaguarda OCR local autónomo para escaneos o imágenes (Air-Gap)
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                        ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
-                            inject_ocr_text_layer(page, ocr_boxes)
+                            existing_ids = {v.id_imagen for v in vis}
+                            for v in ocr_visuals:
+                                if v.id_imagen not in existing_ids:
+                                    vis.append(v)
 
                     page_findings = extract_spatial_key_values(page, canonical_params) if len(page_text.strip()) > 0 else []
                     all_spatial.extend(page_findings)
@@ -540,12 +544,22 @@ async def procesar_documento(
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
                         t_ocr0 = time.perf_counter()
-                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        if settings.LLM_PROVIDER == "local":
+                            from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                            ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
+                            if ocr_full_text.strip():
+                                page_text = ocr_full_text
+                                existing_ids = {v.id_imagen for v in page_visuals}
+                                for v in ocr_visuals:
+                                    if v.id_imagen not in existing_ids:
+                                        page_visuals.append(v)
+                        else:
+                            ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                            if ocr_full_text.strip():
+                                page_text = ocr_full_text
+                                inject_ocr_text_layer(page, ocr_boxes)
                         ocr_ms = (time.perf_counter() - t_ocr0) * 1000
                         total_rapid_ms += ocr_ms
-                        if ocr_full_text.strip():
-                            page_text = ocr_full_text
-                            inject_ocr_text_layer(page, ocr_boxes)
 
                 if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
@@ -831,12 +845,16 @@ async def procesar_documento_stream(
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
                         t_ocr0 = time.perf_counter()
-                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                        ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
                         ocr_ms = (time.perf_counter() - t_ocr0) * 1000
                         total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
-                            inject_ocr_text_layer(page, ocr_boxes)
+                            existing_ids = {v.id_imagen for v in page_visuals}
+                            for v in ocr_visuals:
+                                if v.id_imagen not in existing_ids:
+                                    page_visuals.append(v)
 
                 if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
@@ -862,8 +880,13 @@ async def procesar_documento_stream(
                             page_evidences.extend(h.evidencias)
                     yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'florence2', 'numero_pagina': p_num, 'duracion_ms': round(f_page_ms, 2), 'estado': 'completado'})}\n\n"
 
-                # 3. Inferencia multimodal con Gemini 2.0 Flash solo en modo rapidocr clásico
-                if classification.tipo == TipoPagina.NEEDS_AI and motor_vision == "rapidocr":
+                # 3. Inferencia multimodal con Gemini solo en modo cloud si el texto no fue extraído localmente
+                if (
+                    classification.tipo == TipoPagina.NEEDS_AI
+                    and motor_vision == "rapidocr"
+                    and settings.LLM_PROVIDER == "gemini"
+                    and len(page_text.strip()) == 0
+                ):
                     t_ren = time.perf_counter()
                     webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
                     total_render_ms += (time.perf_counter() - t_ren) * 1000
@@ -1048,6 +1071,30 @@ async def chat_documental(pdf_hash: str, payload: ChatInput):
         pregunta=payload.pregunta,
         historial=payload.historial,
         fallback_store=MOCK_RESULTS_STORE,
+    )
+
+
+@app.post("/chat/{pdf_hash}/stream")
+async def chat_documental_stream(pdf_hash: str, payload: ChatInput):
+    """
+    Endpoint con Streaming Server-Sent Events (SSE) para el chat documental interactivo (Opción 3).
+    Si la consulta es resoluble de inmediato (Opción 1: Estructural en RAM), emite el resultado en 0 ms.
+    Si requiere inferencia de texto (Opción 2: SLM Local), emite tokens en tiempo real (< 350 ms primer token).
+    """
+    from app.services.chat_service import process_chat_query_stream
+    return StreamingResponse(
+        process_chat_query_stream(
+            pdf_hash=pdf_hash,
+            pregunta=payload.pregunta,
+            historial=payload.historial,
+            fallback_store=MOCK_RESULTS_STORE,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

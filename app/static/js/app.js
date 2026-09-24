@@ -388,28 +388,96 @@ async function sendChatMessage() {
     container.scrollTop = container.scrollHeight;
 
     try {
-        const response = await fetch(`/chat/${pdfHash}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                pregunta: pregunta,
-                historial: chatHistory
-            })
-        });
+        let fullRespuesta = "";
+        let finalCitas = [];
+        let finalEvidencias = [];
 
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.message || "Error al consultar Pydective Chat");
+        // Intento 1: Streaming Server-Sent Events (SSE) en tiempo real (Opción 3)
+        let streamingSuccess = false;
+        try {
+            const streamRes = await fetch(`/chat/${pdfHash}/stream`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    pregunta: pregunta,
+                    historial: chatHistory
+                })
+            });
+
+            if (streamRes.ok && streamRes.body) {
+                const reader = streamRes.body.getReader();
+                const decoder = new TextDecoder();
+                let streamBuffer = "";
+                assistantBubble.innerHTML = `<div class="chat-markdown-body"></div>`;
+                const textContainer = assistantBubble.querySelector(".chat-markdown-body");
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    streamBuffer += decoder.decode(value, { stream: true });
+                    const lines = streamBuffer.split("\n");
+                    streamBuffer = lines.pop() || "";
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith("data: ")) {
+                            try {
+                                const payload = JSON.parse(trimmed.substring(6));
+                                if (payload.token) {
+                                    fullRespuesta += payload.token;
+                                    textContainer.textContent = fullRespuesta;
+                                    container.scrollTop = container.scrollHeight;
+                                }
+                                if (payload.citas && payload.citas.length > 0) {
+                                    finalCitas = payload.citas;
+                                }
+                                if (payload.final) {
+                                    streamingSuccess = true;
+                                }
+                            } catch (e) {
+                                // Ignore non-JSON ping lines
+                            }
+                        }
+                    }
+                }
+                if (fullRespuesta.trim()) {
+                    streamingSuccess = true;
+                }
+            }
+        } catch (streamErr) {
+            console.warn("SSE stream failed, falling back to standard chat endpoint:", streamErr);
+            streamingSuccess = false;
         }
 
-        const data = await response.json();
+        // Intento 2: Fallback estándar si SSE no produjo respuesta
+        if (!streamingSuccess || !fullRespuesta.trim()) {
+            const response = await fetch(`/chat/${pdfHash}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    pregunta: pregunta,
+                    historial: chatHistory
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.message || "Error al consultar Pydective Chat");
+            }
+
+            const data = await response.json();
+            fullRespuesta = data.respuesta;
+            finalCitas = data.citas || [];
+            finalEvidencias = data.evidencias_relacionadas || [];
+        }
+
         chatHistory.push({ role: "user", content: pregunta });
-        chatHistory.push({ role: "assistant", content: data.respuesta });
+        chatHistory.push({ role: "assistant", content: fullRespuesta });
 
         let citasHtml = "";
-        if (data.evidencias_relacionadas && data.evidencias_relacionadas.length > 0) {
+        if (finalEvidencias && finalEvidencias.length > 0) {
             citasHtml = `<div class="citations-list" style="margin-top: 0.65rem;">` +
-                data.evidencias_relacionadas.map(ev => {
+                finalEvidencias.map(ev => {
                     const bboxStr = JSON.stringify(ev.bbox || []);
                     const label = (ev.text || "Evidencia").substring(0, 25).replace(/'/g, "\\'");
                     return `<button type="button" class="citation-pill citation-pill-interactive" onclick="window.highlightSourceInPdf(${ev.page}, ${bboxStr}, '${label}')" title="Localizar en visor: Pág ${ev.page}">
@@ -418,9 +486,9 @@ async function sendChatMessage() {
                     </button>`;
                 }).join("") +
                 `</div>`;
-        } else if (data.citas && data.citas.length > 0) {
+        } else if (finalCitas && finalCitas.length > 0) {
             citasHtml = `<div class="citations-list" style="margin-top: 0.65rem;">` +
-                data.citas.map(c => {
+                finalCitas.map(c => {
                     const match = c.match(/\d+/);
                     const pageNum = match ? parseInt(match[0], 10) : 1;
                     return `<button type="button" class="citation-pill citation-pill-interactive" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pageNum})" title="Ir a Pág ${pageNum}">
@@ -431,7 +499,12 @@ async function sendChatMessage() {
                 `</div>`;
         }
 
-        assistantBubble.innerHTML = `<p>${data.respuesta}</p>${citasHtml}`;
+        // Formatear saltos de línea para legibilidad
+        const formattedRespuesta = fullRespuesta
+            .replace(/\n\n/g, "</p><p>")
+            .replace(/\n/g, "<br>");
+
+        assistantBubble.innerHTML = `<div class="chat-markdown-body"><p>${formattedRespuesta}</p></div>${citasHtml}`;
         container.scrollTop = container.scrollHeight;
     } catch (err) {
         assistantBubble.innerHTML = `<p style="color: var(--danger);">[Error] ${err.message}</p>`;

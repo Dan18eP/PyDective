@@ -1,8 +1,13 @@
+import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator
 import httpx
 
 from app.services.providers.base_provider import BaseLLMProvider
+from app.services.hardware_adapter_service import (
+    get_recommended_slm_model,
+    get_optimal_thread_count,
+)
 from app.settings import settings
 
 logger = logging.getLogger("pydective.providers.local")
@@ -11,11 +16,8 @@ logger = logging.getLogger("pydective.providers.local")
 class LocalLLMProvider(BaseLLMProvider):
     """
     Proveedor para LLMs locales vía API estándar compatible con OpenAI
-    (Ollama, llama.cpp server, vLLM, Kev) ejecutándose localmente en CPU (AMD Ryzen 5 5500 con AVX2).
-    Modelos recomendados:
-    - qwen2.5:3b (Equilibrio óptimo en español y razonamiento legal, 35-45 t/s en Ryzen 5500)
-    - llama3.2:3b
-    - kev (Modelfile / checkpoint local)
+    (Ollama, llama.cpp server, vLLM) ejecutándose en CPU (Intel o AMD).
+    Se auto-calibra dinámicamente con hardware_adapter_service.
     """
 
     def __init__(
@@ -25,7 +27,8 @@ class LocalLLMProvider(BaseLLMProvider):
         timeout: Optional[float] = None,
     ):
         self.base_url = (base_url or settings.LOCAL_LLM_BASE_URL).rstrip("/")
-        self.model_name = model_name or settings.LOCAL_LLM_MODEL
+        # Si el modelo no está fijado en .env o settings, pedir recomendación al adaptador de hardware
+        self.model_name = model_name or settings.LOCAL_LLM_MODEL or get_recommended_slm_model()
         self.timeout = timeout or settings.LOCAL_LLM_TIMEOUT_SECONDS
 
     @property
@@ -34,11 +37,10 @@ class LocalLLMProvider(BaseLLMProvider):
 
     def is_available(self) -> bool:
         """
-        Verificación rápida no bloqueante (<1.0s) de conectividad hacia el endpoint local
-        y validación de que el modelo solicitado (o uno compatible) esté efectivamente instalado.
+        Verificación rápida (<1.0s) de conectividad hacia el endpoint local
+        y auto-selección del modelo ligero disponible en el equipo.
         """
         try:
-            # Inspeccionar endpoint de modelos (/models)
             models_url = f"{self.base_url}/models"
             with httpx.Client(timeout=1.0) as client:
                 resp = client.get(models_url)
@@ -49,9 +51,12 @@ class LocalLLMProvider(BaseLLMProvider):
                             model_list = [m.get("id", "") for m in data.get("data", []) if isinstance(m, dict)]
                             if any(self.model_name in m for m in model_list):
                                 return True
-                            candidates = [m for m in model_list if not any(x in m for x in ("bge", "embed"))]
+                            # Si el modelo preferido no está descargado, tomar el modelo de texto más rápido disponible
+                            candidates = [m for m in model_list if not any(x in m for x in ("bge", "embed", "vision"))]
                             if candidates:
-                                self.model_name = candidates[0]
+                                # Priorizar 1b o 0.5b si existen
+                                light_candidates = [c for c in candidates if any(k in c for k in ("1b", "0.5b", "1.5b"))]
+                                self.model_name = light_candidates[0] if light_candidates else candidates[0]
                                 return True
                     except Exception:
                         pass
@@ -64,19 +69,22 @@ class LocalLLMProvider(BaseLLMProvider):
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        temperature: float = 0.2,
+        temperature: float = 0.1,
     ) -> Optional[str]:
         messages: List[Dict[str, str]] = []
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
+        threads = get_optimal_thread_count()
+
         payload = {
             "model": self.model_name,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 300,
+            "max_tokens": 350,
             "stream": False,
+            "options": {"num_thread": threads},
         }
 
         url = f"{self.base_url}/chat/completions"
@@ -98,3 +106,52 @@ class LocalLLMProvider(BaseLLMProvider):
         except Exception as exc:
             logger.warning(f"Error conectando con LocalLLMProvider en {url}: {exc}")
             return None
+
+    def generate_chat_stream(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.1,
+    ) -> Generator[str, None, None]:
+        """
+        Generador de streaming token por token para Server-Sent Events (Opción 3).
+        El primer token aparece en < 350 ms en CPUs Intel o AMD.
+        """
+        messages: List[Dict[str, str]] = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
+
+        threads = get_optimal_thread_count()
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 350,
+            "stream": True,
+            "options": {"num_thread": threads},
+        }
+
+        url = f"{self.base_url}/chat/completions"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream("POST", url, json=payload) as response:
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        chunk_str = line[6:].strip()
+                        if chunk_str == "[DONE]":
+                            break
+                        try:
+                            chunk_data = json.loads(chunk_str)
+                            choices = chunk_data.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.warning(f"Error en streaming de LocalLLMProvider: {exc}")

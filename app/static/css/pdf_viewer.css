@@ -426,6 +426,56 @@
     font-weight: 800;
 }
 
+/* Exact Coordinates Pill on Grounding Target */
+.pdf-grounding-coords-pill {
+    position: absolute;
+    bottom: -22px;
+    right: -2px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.68rem;
+    color: #38bdf8;
+    white-space: nowrap;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    z-index: 38;
+    pointer-events: none;
+    letter-spacing: 0.02em;
+}
+
+/* Precision Corner Crosshairs */
+.pdf-corner-crosshair {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    pointer-events: none;
+    border-color: #ffffff;
+    border-style: solid;
+    z-index: 36;
+}
+.pdf-corner-crosshair.top-left {
+    top: -4px;
+    left: -4px;
+    border-width: 2px 0 0 2px;
+}
+.pdf-corner-crosshair.top-right {
+    top: -4px;
+    right: -4px;
+    border-width: 2px 2px 0 0;
+}
+.pdf-corner-crosshair.bottom-left {
+    bottom: -4px;
+    left: -4px;
+    border-width: 0 0 2px 2px;
+}
+.pdf-corner-crosshair.bottom-right {
+    bottom: -4px;
+    right: -4px;
+    border-width: 0 2px 2px 0;
+}
+
 /* Page Card Focus Glow */
 .pdf-page-card-focused {
     border-color: #06b6d4 !important;

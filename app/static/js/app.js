@@ -6,10 +6,13 @@ let chatHistory = [];
 let jobStartTime = null;
 let timerInterval = null;
 
+let selectedVisionEngine = "rapidocr";
+
 document.addEventListener("DOMContentLoaded", () => {
     initDropzone();
     initParamInputs();
     renderActiveParams();
+    initEngineSelector();
 });
 
 // Dropzone Initialization
@@ -157,6 +160,21 @@ function renderActiveParams() {
     });
 }
 
+function initEngineSelector() {
+    const cards = document.querySelectorAll(".engine-card");
+    cards.forEach(card => {
+        card.addEventListener("click", () => {
+            cards.forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+            const radio = card.querySelector(".engine-radio");
+            if (radio) {
+                radio.checked = true;
+                selectedVisionEngine = radio.value;
+            }
+        });
+    });
+}
+
 // Job Submission & SSE Streaming
 async function submitJob() {
     if (!selectedFile) {
@@ -180,11 +198,13 @@ async function submitJob() {
     if (progressPanel) progressPanel.classList.remove("hidden");
 
     startTimer();
+    appendTerminal(`> Modo de visión: ${selectedVisionEngine.toUpperCase()}`);
     appendTerminal("> Enviando archivo y parámetros al orquestador...");
 
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("parametros", JSON.stringify(activeParams));
+    formData.append("motor_vision", selectedVisionEngine);
     
     const catalogarCheck = document.getElementById("catalogar-imagenes-checkbox");
     if (catalogarCheck) {
@@ -251,14 +271,21 @@ function handleStreamEvent(event) {
     const pagesLabel = document.getElementById("pages-processed-label");
 
     if (event.tipo === "inicio") {
-        if (statusText) statusText.textContent = `Calculado SHA-256 (${event.pdf_hash.substring(0, 10)}...). Total: ${event.total_paginas} páginas.`;
+        if (statusText) statusText.textContent = `Calculado SHA-256 (${event.pdf_hash.substring(0, 10)}...). Total: ${event.total_paginas} páginas. Motor: ${event.motor_vision || selectedVisionEngine}`;
         if (progressBar) progressBar.style.width = "15%";
         initPageGrid(event.total_paginas);
         appendTerminal(`> Hash SHA-256: ${event.pdf_hash}`);
-        appendTerminal(`> Total páginas detectadas: ${event.total_paginas}`);
+        appendTerminal(`> Total páginas: ${event.total_paginas} | Motor: ${event.motor_vision || selectedVisionEngine}`);
+    } else if (event.tipo === "progreso_motor") {
+        if (event.estado === "analizando_vlm") {
+            if (statusText) statusText.textContent = `Pág ${event.numero_pagina}: Ejecutando inferencia multimodal Microsoft Florence-2 VLM en CPU...`;
+            appendTerminal(`> Pág ${event.numero_pagina}: Inferencia Florence-2 VLM en CPU iniciada...`);
+        } else if (event.estado === "completado") {
+            appendTerminal(`> Pág ${event.numero_pagina}: Florence-2 VLM completado en ${event.duracion_ms} ms`);
+        }
     } else if (event.tipo === "pagina") {
         updatePageBlock(event.numero_pagina, event.carril);
-        if (statusText) statusText.textContent = `Página ${event.numero_pagina} clasificada como '${event.carril}' (${event.duracion_ms.toFixed(1)} ms)`;
+        if (statusText) statusText.textContent = `Página ${event.numero_pagina} procesada (${event.duracion_ms.toFixed(1)} ms)`;
         if (pagesLabel) pagesLabel.textContent = `${event.paginas_completadas} / ${event.total_paginas}`;
         
         const pct = Math.min(85, Math.floor((event.paginas_completadas / event.total_paginas) * 80) + 15);
@@ -269,6 +296,9 @@ function handleStreamEvent(event) {
         if (progressBar) progressBar.style.width = "100%";
         if (statusText) statusText.textContent = "Procesamiento completado con éxito. Redirigiendo...";
         appendTerminal(`> Dictamen consolidado en ${event.duracion_total_ms.toFixed(1)} ms. Caché: ${event.nivel_cache}`);
+        if (event.comparativa_motores && event.comparativa_motores.resumen) {
+            appendTerminal(`> Benchmark A/B: ${event.comparativa_motores.resumen}`);
+        }
         setTimeout(() => {
             window.location.href = `/resultados/${event.pdf_hash}`;
         }, 600);

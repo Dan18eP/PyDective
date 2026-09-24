@@ -89,6 +89,49 @@
                     </div>
                 </div>
 
+                <!-- Vision / Extraction Engine Switch -->
+                <div class="form-group">
+                    <div class="label-with-hint">
+                        <label class="form-label">Motor de Visión y Extracción</label>
+                        <span class="label-subhint">Selecciona el motor o ejecuta la comparativa dual</span>
+                    </div>
+
+                    <div class="engine-selector-grid" id="engine-selector-grid">
+                        <label class="engine-card active" id="engine-card-rapidocr">
+                            <input type="radio" name="motor_vision" value="rapidocr" checked class="engine-radio">
+                            <div class="engine-card-content">
+                                <div class="engine-card-top">
+                                    <span class="engine-name">RapidOCR ONNX</span>
+                                    <span class="engine-badge badge-ultra-fast">~120 ms • AVX2</span>
+                                </div>
+                                <span class="engine-desc">Motor local en C++/ONNX Runtime. Máxima velocidad determinista Cero-IA.</span>
+                            </div>
+                        </label>
+
+                        <label class="engine-card" id="engine-card-florence2">
+                            <input type="radio" name="motor_vision" value="florence2" class="engine-radio">
+                            <div class="engine-card-content">
+                                <div class="engine-card-top">
+                                    <span class="engine-name">Microsoft Florence-2</span>
+                                    <span class="engine-badge badge-vlm">~8-14 s • VLM 230M</span>
+                                </div>
+                                <span class="engine-desc">Modelo fundacional de visión multimodal. Polígonos de alta precisión en CPU.</span>
+                            </div>
+                        </label>
+
+                        <label class="engine-card" id="engine-card-dual">
+                            <input type="radio" name="motor_vision" value="dual" class="engine-radio">
+                            <div class="engine-card-content">
+                                <div class="engine-card-top">
+                                    <span class="engine-name">Benchmark Dual (A/B)</span>
+                                    <span class="engine-badge badge-benchmark">Comparativa Paralela</span>
+                                </div>
+                                <span class="engine-desc">Ejecuta ambos motores simultáneamente para contrastar tiempo y exactitud.</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Forensic Settings -->
                 <div class="form-group checkbox-group">
                     <label class="custom-checkbox-label">

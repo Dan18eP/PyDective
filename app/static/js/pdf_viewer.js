@@ -305,7 +305,7 @@ class PydectivePdfViewer {
             // Añadir pin flotante fluorescente indicando el número de coincidencia
             const pin = document.createElement('span');
             pin.className = 'pdf-match-pin';
-            pin.innerText = `🔍 ${this.currentMatchIndex + 1}/${this.matches.length}`;
+            pin.innerText = `[MATCH ${this.currentMatchIndex + 1}/${this.matches.length}]`;
             activeBox.appendChild(pin);
         }
 
@@ -374,26 +374,26 @@ class PydectivePdfViewer {
             const scaleX = parseFloat(pInfo.overlay.style.width) / pInfo.pageWidthPts;
             const scaleY = parseFloat(pInfo.overlay.style.height) / pInfo.pageHeightPts;
 
-            // Determinar categoría cromática del parámetro
+            // Determinar categoría cromática del parámetro (sin emojis)
             const normLabel = (label || '').toLowerCase();
             let themeClass = 'grounding-theme-default';
-            let icon = '📍';
+            let icon = '[LOC]';
 
             if (/total|valor|precio|canon|monto|saldo|subtotal|iva/.test(normLabel)) {
                 themeClass = 'grounding-theme-currency';
-                icon = '💰';
+                icon = '[$]';
             } else if (/arrendador|representante|cliente|notario|titular|parte|persona|contratante/.test(normLabel)) {
                 themeClass = 'grounding-theme-entity';
-                icon = '👤';
+                icon = '[USR]';
             } else if (/fecha|date|emision|vencimiento|plazo/.test(normLabel)) {
                 themeClass = 'grounding-theme-date';
-                icon = '📅';
+                icon = '[DATE]';
             } else if (/nit|rut|cedula|identificacion|id/.test(normLabel)) {
                 themeClass = 'grounding-theme-id';
-                icon = '🆔';
+                icon = '[ID]';
             } else if (/firma|sello|qr|codigo/.test(normLabel)) {
                 themeClass = 'grounding-theme-visual';
-                icon = '🔏';
+                icon = '[SEC]';
             }
 
             const gBox = document.createElement('div');
@@ -403,17 +403,30 @@ class PydectivePdfViewer {
             gBox.style.width = `${Math.max(14, (x1 - x0) * scaleX + 6)}px`;
             gBox.style.height = `${Math.max(14, (y1 - y0) * scaleY + 6)}px`;
 
+            // 4 Esquinas de mira de precisión (crosshairs)
+            ['top-left', 'top-right', 'bottom-left', 'bottom-right'].forEach(pos => {
+                const corner = document.createElement('div');
+                corner.className = `pdf-corner-crosshair ${pos}`;
+                gBox.appendChild(corner);
+            });
+
             // Onda de radar expansiva para guiar la vista al punto exacto
             const ripple = document.createElement('div');
             ripple.className = 'pdf-grounding-ripple';
             gBox.appendChild(ripple);
 
-            // Badge superior enriquecido con icono y fragmento de valor
+            // Badge superior enriquecido con icono de texto y fragmento de valor
             const badge = document.createElement('span');
             badge.className = 'pdf-grounding-label';
             const displaySnippet = valueSnippet ? `: ${valueSnippet.length > 25 ? valueSnippet.substring(0, 22) + '...' : valueSnippet}` : '';
             badge.innerHTML = `<span class="badge-icon">${icon}</span> <strong class="badge-param">${label}</strong>${displaySnippet}`;
             gBox.appendChild(badge);
+
+            // Pastilla flotante inferior con coordenadas exactas [x₀, y₀, x₁, y₁]
+            const coordsPill = document.createElement('div');
+            coordsPill.className = 'pdf-grounding-coords-pill';
+            coordsPill.innerHTML = `<code>[${x0.toFixed(1)}, ${y0.toFixed(1)}, ${x1.toFixed(1)}, ${y1.toFixed(1)}]</code>`;
+            gBox.appendChild(coordsPill);
 
             pInfo.overlay.appendChild(gBox);
 

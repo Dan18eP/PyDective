@@ -63,6 +63,11 @@ from app.services.image_service import (
     catalog_page_images,
 )
 from app.services.ocr_service import extract_page_ocr
+from app.services.florence_service import (
+    extract_page_florence,
+    florence_findings_to_domain,
+    build_engine_benchmark,
+)
 from app.services.gemini_service import (
     invoke_gemini_multimodal_page,
 )
@@ -402,6 +407,8 @@ def _build_sample_test_job_output(pdf_hash: str) -> JobOutput:
                 valor_normalizado="MARIA CONSUELO GOMEZ",
             ),
         ],
+        motor_seleccionado="rapidocr",
+        comparativa_motores=None,
     )
 
 
@@ -454,10 +461,14 @@ async def procesar_documento(
     file: UploadFile = File(...),
     parametros: str = Form(""),
     catalogar_imagenes: bool = Form(True),
+    motor_vision: str = Form("rapidocr"),
 ):
     """
     Endpoint sincrónico para análisis forense de un documento PDF.
     """
+    if motor_vision not in ("rapidocr", "florence2", "dual"):
+        motor_vision = "rapidocr"
+
     # 1. Normalización canónica de parámetros (US-02, US-03, ADR-003)
     canonical_params, query_hash = canonicalize_parameters(parametros)
 
@@ -466,21 +477,24 @@ async def procesar_documento(
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
     save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
 
+    cache_query_key = query_hash if motor_vision == "rapidocr" else f"{query_hash}_{motor_vision}"
+
     # 3. Consulta temprana de Caché L0 instantánea (US-14)
-    cached_l0 = get_l0_cache(pdf_hash, query_hash)
-    if cached_l0 is not None and is_valid_result(cached_l0):
-        MOCK_RESULTS_STORE[pdf_hash] = cached_l0
-        return cached_l0
+    if motor_vision == "rapidocr":
+        cached_l0 = get_l0_cache(pdf_hash, query_hash)
+        if cached_l0 is not None and is_valid_result(cached_l0):
+            MOCK_RESULTS_STORE[pdf_hash] = cached_l0
+            return cached_l0
 
-    # 4. Reutilización de conocimiento en Caché L1 documental (US-15)
-    cached_l1 = get_l1_cache(pdf_hash)
-    if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
-        resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
-        if resolved_l1 is not None and is_valid_result(resolved_l1):
-            MOCK_RESULTS_STORE[pdf_hash] = resolved_l1
-            return resolved_l1
+        # 4. Reutilización de conocimiento en Caché L1 documental (US-15)
+        cached_l1 = get_l1_cache(pdf_hash)
+        if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
+            resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
+            if resolved_l1 is not None and is_valid_result(resolved_l1):
+                MOCK_RESULTS_STORE[pdf_hash] = resolved_l1
+                return resolved_l1
 
-    flight_key = f"{pdf_hash}:{query_hash}"
+    flight_key = f"{pdf_hash}:{cache_query_key}"
 
     async def _do_extraction():
         resultados_por_pagina = []
@@ -492,6 +506,9 @@ async def procesar_documento(
         total_retrieval_ms = 0.0
         total_render_ms = 0.0
         total_gemini_ms = 0.0
+        total_rapid_ms = 0.0
+        total_florence_ms = 0.0
+        all_florence_raw = []
 
         try:
             ai_queue = []
@@ -522,37 +539,54 @@ async def procesar_documento(
 
                 page_evidences = []
 
-                # 1. Extracción espacial determinista nativa (Cero-IA) SIEMPRE que haya texto en la página
+                # 1. Extracción con RapidOCR / Cero-IA
                 page_text = page.get_text()
 
-                # Salvaguarda OCR-01 / OCR-02: Para páginas clasificadas como NEEDS_AI sin texto nativo, invocar OCR local autónomo
-                if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                    ocr_full_text, ocr_boxes = extract_page_ocr(page)
-                    if ocr_full_text.strip():
-                        page_text = ocr_full_text
-                        for b in ocr_boxes:
-                            try:
-                                rect = pymupdf.Rect(b["bbox"])
-                                page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
-                            except Exception:
-                                pass
+                if motor_vision in ("rapidocr", "dual"):
+                    if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
+                        t_ocr0 = time.perf_counter()
+                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        total_rapid_ms += ocr_ms
+                        if ocr_full_text.strip():
+                            page_text = ocr_full_text
+                            for b in ocr_boxes:
+                                try:
+                                    rect = pymupdf.Rect(b["bbox"])
+                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                                except Exception:
+                                    pass
 
-                if len(page_text.strip()) > 0:
+                if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
                     page_findings = extract_spatial_key_values(page, canonical_params)
-                    total_retrieval_ms += (time.perf_counter() - t_r) * 1000
+                    ret_ms = (time.perf_counter() - t_r) * 1000
+                    total_retrieval_ms += ret_ms
+                    total_rapid_ms += ret_ms
                     all_spatial_findings.extend(page_findings)
                     for h in page_findings:
                         page_evidences.extend(h.evidencias)
 
-                # Si requiere IA, renderizar WebP y encolar para procesamiento paralelo
-                if classification.tipo == TipoPagina.NEEDS_AI:
+                # 2. Extracción con Florence-2 si se seleccionó florence2 o dual
+                f_page_ms = 0.0
+                if motor_vision in ("florence2", "dual"):
+                    f_findings, f_page_ms, _ = extract_page_florence(page, p_num, canonical_params)
+                    total_florence_ms += f_page_ms
+                    all_florence_raw.extend(f_findings)
+                    if motor_vision == "florence2":
+                        f_domain = florence_findings_to_domain(f_findings, p_num)
+                        all_spatial_findings.extend(f_domain)
+                        for h in f_domain:
+                            page_evidences.extend(h.evidencias)
+
+                # Inferencia Gemini solo en modo rapidocr clásico si la página lo requiere
+                if classification.tipo == TipoPagina.NEEDS_AI and motor_vision == "rapidocr":
                     t_ren = time.perf_counter()
                     webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
                     total_render_ms += (time.perf_counter() - t_ren) * 1000
                     ai_queue.append((p_num, webp_bytes, page_text))
 
-                page_dur = round(class_ms + prep_ms, 2)
+                page_dur = round(class_ms + prep_ms + (f_page_ms if motor_vision == "florence2" else 0.0), 2)
                 resultados_por_pagina.append(
                     ResultadoPagina(
                         numero_pagina=p_num,
@@ -566,8 +600,7 @@ async def procesar_documento(
                     )
                 )
 
-            # Inferencia multimodal concurrente con Gemini en carril NEEDS_AI (US-11, US-12, US-18)
-            # Garantiza que todas las páginas que requieren IA se envían y procesan ANTES de retornar
+            # Inferencia multimodal concurrente con Gemini si hay elementos en cola
             if ai_queue:
                 loop = asyncio.get_running_loop()
                 def _invoke_ai(item):
@@ -625,7 +658,21 @@ async def procesar_documento(
                     )
                 )
 
-        total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms + 10.0, 2)
+        comparativa_motores = None
+        if motor_vision == "dual":
+            comparativa_motores = build_engine_benchmark(
+                rapid_findings=final_hallazgos,
+                rapid_duration_ms=total_rapid_ms if total_rapid_ms > 0 else (total_retrieval_ms or 15.0),
+                florence_findings=all_florence_raw,
+                florence_duration_ms=total_florence_ms,
+                canonical_params=canonical_params,
+            )
+
+        total_dur_ms = round(
+            total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms
+            + (total_florence_ms if motor_vision in ("florence2", "dual") else 0.0) + 10.0,
+            2
+        )
         job_status = EstadoCobertura.PARTIAL if failed_pages else EstadoCobertura.COMPLETE
 
         output = JobOutput(
@@ -647,10 +694,12 @@ async def procesar_documento(
                 preprocess_ms=round(total_prep_ms, 2),
                 retrieval_ms=round(total_retrieval_ms, 2),
                 render_ms=round(total_render_ms, 2),
-                gemini_ms=round(total_gemini_ms, 2),
+                gemini_ms=round(total_florence_ms if motor_vision in ("florence2", "dual") else total_gemini_ms, 2),
                 serialization_ms=2.0,
                 total_ms=total_dur_ms,
             ),
+            motor_seleccionado=motor_vision,
+            comparativa_motores=comparativa_motores,
         )
 
         # Indexación L1 y persistencia en L0
@@ -670,7 +719,7 @@ async def procesar_documento(
         set_l1_cache(pdf_hash, l1_entry)
 
         if job_status == EstadoCobertura.COMPLETE:
-            set_l0_cache(pdf_hash, query_hash, output)
+            set_l0_cache(pdf_hash, cache_query_key, output)
             evaluate_and_create_l2_cache(pdf_hash, estimated_tokens=total_pages * 400)
 
         save_job_result(pdf_hash, output)
@@ -685,10 +734,14 @@ async def procesar_documento_stream(
     file: UploadFile = File(...),
     parametros: str = Form(""),
     catalogar_imagenes: bool = Form(True),
+    motor_vision: str = Form("rapidocr"),
 ):
     """
     Endpoint SSE (Server-Sent Events) para transmitir progreso en tiempo real.
     """
+    if motor_vision not in ("rapidocr", "florence2", "dual"):
+        motor_vision = "rapidocr"
+
     # 1. Normalización canónica de parámetros (US-02, US-03, ADR-003)
     canonical_params, query_hash = canonicalize_parameters(parametros)
 
@@ -697,31 +750,34 @@ async def procesar_documento_stream(
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
     save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
 
-    # 3. Consulta temprana L0 en streaming (US-14)
-    cached_l0 = get_l0_cache(pdf_hash, query_hash)
-    if cached_l0 is not None and is_valid_result(cached_l0):
-        async def cached_stream_gen():
-            yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': cached_l0.paginas_totales, 'nivel_cache': 'L0'})}\n\n"
-            for p in cached_l0.resultados_por_pagina:
-                yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': cached_l0.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
-            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': cached_l0.status.value, 'nivel_cache': 'L0', 'duracion_total_ms': cached_l0.duracion_total_ms, 'paginas_totales': cached_l0.paginas_totales, 'paginas_pendientes': cached_l0.paginas_pendientes, 'hallazgos': [h.model_dump() for h in cached_l0.hallazgos]})}\n\n"
-        return StreamingResponse(cached_stream_gen(), media_type="text/event-stream")
+    cache_query_key = query_hash if motor_vision == "rapidocr" else f"{query_hash}_{motor_vision}"
 
-    # 4. Reutilización L1 en streaming (US-15)
-    cached_l1 = get_l1_cache(pdf_hash)
-    if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
-        resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
-        if resolved_l1 is not None and is_valid_result(resolved_l1):
-            async def l1_stream_gen():
-                yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': resolved_l1.paginas_totales, 'nivel_cache': 'L1'})}\n\n"
-                for p in resolved_l1.resultados_por_pagina:
-                    yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': resolved_l1.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
-                yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': resolved_l1.status.value, 'nivel_cache': 'L1', 'duracion_total_ms': resolved_l1.duracion_total_ms, 'paginas_totales': resolved_l1.paginas_totales, 'paginas_pendientes': resolved_l1.paginas_pendientes, 'hallazgos': [h.model_dump() for h in resolved_l1.hallazgos]})}\n\n"
-            return StreamingResponse(l1_stream_gen(), media_type="text/event-stream")
+    # 3. Consulta temprana L0 en streaming (US-14)
+    if motor_vision == "rapidocr":
+        cached_l0 = get_l0_cache(pdf_hash, query_hash)
+        if cached_l0 is not None and is_valid_result(cached_l0):
+            async def cached_stream_gen():
+                yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': cached_l0.paginas_totales, 'nivel_cache': 'L0', 'motor_vision': motor_vision})}\n\n"
+                for p in cached_l0.resultados_por_pagina:
+                    yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': cached_l0.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
+                yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': cached_l0.status.value, 'nivel_cache': 'L0', 'duracion_total_ms': cached_l0.duracion_total_ms, 'paginas_totales': cached_l0.paginas_totales, 'paginas_pendientes': cached_l0.paginas_pendientes, 'hallazgos': [h.model_dump() for h in cached_l0.hallazgos], 'motor_seleccionado': cached_l0.motor_seleccionado, 'comparativa_motores': cached_l0.comparativa_motores})}\n\n"
+            return StreamingResponse(cached_stream_gen(), media_type="text/event-stream")
+
+        # 4. Reutilización L1 en streaming (US-15)
+        cached_l1 = get_l1_cache(pdf_hash)
+        if cached_l1 is not None and cached_l1.status == EstadoCobertura.COMPLETE:
+            resolved_l1 = resolve_from_l1(cached_l1, canonical_params, pdf_hash, query_hash)
+            if resolved_l1 is not None and is_valid_result(resolved_l1):
+                async def l1_stream_gen():
+                    yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': resolved_l1.paginas_totales, 'nivel_cache': 'L1', 'motor_vision': motor_vision})}\n\n"
+                    for p in resolved_l1.resultados_por_pagina:
+                        yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p.numero_pagina, 'carril': p.tipo.value, 'exito': p.exito, 'error': p.error, 'duracion_ms': p.duracion_ms, 'paginas_completadas': p.numero_pagina, 'total_paginas': resolved_l1.paginas_totales, 'evidencias': [e.model_dump() for e in p.evidencias], 'elementos_visuales': [v.model_dump() for v in p.metadatos_visuales], 'gemini_ms': 0.0})}\n\n"
+                    yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': resolved_l1.status.value, 'nivel_cache': 'L1', 'duracion_total_ms': resolved_l1.duracion_total_ms, 'paginas_totales': resolved_l1.paginas_totales, 'paginas_pendientes': resolved_l1.paginas_pendientes, 'hallazgos': [h.model_dump() for h in resolved_l1.hallazgos], 'motor_seleccionado': resolved_l1.motor_seleccionado, 'comparativa_motores': resolved_l1.comparativa_motores})}\n\n"
+                return StreamingResponse(l1_stream_gen(), media_type="text/event-stream")
 
     async def event_generator():
         try:
-            yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': total_pages})}\n\n"
+            yield f"data: {json.dumps({'tipo': 'inicio', 'pdf_hash': pdf_hash, 'total_paginas': total_pages, 'motor_vision': motor_vision})}\n\n"
             await asyncio.sleep(0.02)
 
             resultados_por_pagina = []
@@ -733,6 +789,9 @@ async def procesar_documento_stream(
             total_retrieval_ms = 0.0
             total_render_ms = 0.0
             total_gemini_ms = 0.0
+            total_rapid_ms = 0.0
+            total_florence_ms = 0.0
+            all_florence_raw = []
 
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
@@ -764,31 +823,50 @@ async def procesar_documento_stream(
                 page_error = None
                 page_gemini_ms = 0.0
 
-                # 1. Extracción espacial determinista nativa (Cero-IA) SIEMPRE que haya texto en la página
+                # 1. Extracción con RapidOCR / Cero-IA
                 page_text = page.get_text()
 
-                # Salvaguarda OCR-01 / OCR-02: Para páginas clasificadas como NEEDS_AI sin texto nativo, invocar OCR local autónomo
-                if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                    ocr_full_text, ocr_boxes = extract_page_ocr(page)
-                    if ocr_full_text.strip():
-                        page_text = ocr_full_text
-                        for b in ocr_boxes:
-                            try:
-                                rect = pymupdf.Rect(b["bbox"])
-                                page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
-                            except Exception:
-                                pass
+                if motor_vision in ("rapidocr", "dual"):
+                    if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
+                        t_ocr0 = time.perf_counter()
+                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        total_rapid_ms += ocr_ms
+                        if ocr_full_text.strip():
+                            page_text = ocr_full_text
+                            for b in ocr_boxes:
+                                try:
+                                    rect = pymupdf.Rect(b["bbox"])
+                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
+                                except Exception:
+                                    pass
 
-                if len(page_text.strip()) > 0:
+                if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
                     page_findings = extract_spatial_key_values(page, canonical_params)
-                    total_retrieval_ms += (time.perf_counter() - t_r) * 1000
+                    ret_ms = (time.perf_counter() - t_r) * 1000
+                    total_retrieval_ms += ret_ms
+                    total_rapid_ms += ret_ms
                     all_spatial_findings.extend(page_findings)
                     for h in page_findings:
                         page_evidences.extend(h.evidencias)
 
-                # 2. Inferencia multimodal con Gemini 2.0 Flash en carril NEEDS_AI (US-11, US-12)
-                if classification.tipo == TipoPagina.NEEDS_AI:
+                # 2. Extracción con Florence-2 si se seleccionó florence2 o dual
+                f_page_ms = 0.0
+                if motor_vision in ("florence2", "dual"):
+                    yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'florence2', 'numero_pagina': p_num, 'estado': 'analizando_vlm'})}\n\n"
+                    f_findings, f_page_ms, _ = extract_page_florence(page, p_num, canonical_params)
+                    total_florence_ms += f_page_ms
+                    all_florence_raw.extend(f_findings)
+                    if motor_vision == "florence2":
+                        f_domain = florence_findings_to_domain(f_findings, p_num)
+                        all_spatial_findings.extend(f_domain)
+                        for h in f_domain:
+                            page_evidences.extend(h.evidencias)
+                    yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'florence2', 'numero_pagina': p_num, 'duracion_ms': round(f_page_ms, 2), 'estado': 'completado'})}\n\n"
+
+                # 3. Inferencia multimodal con Gemini 2.0 Flash solo en modo rapidocr clásico
+                if classification.tipo == TipoPagina.NEEDS_AI and motor_vision == "rapidocr":
                     t_ren = time.perf_counter()
                     webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)
                     total_render_ms += (time.perf_counter() - t_ren) * 1000
@@ -812,7 +890,7 @@ async def procesar_documento_stream(
                         for h in gemini_res.hallazgos:
                             page_evidences.extend(h.evidencias)
 
-                page_dur = round(class_ms + prep_ms + page_gemini_ms, 2)
+                page_dur = round(class_ms + prep_ms + page_gemini_ms + (f_page_ms if motor_vision == "florence2" else 0.0), 2)
                 yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p_num, 'carril': classification.tipo.value, 'exito': page_exito, 'error': page_error, 'duracion_ms': page_dur, 'paginas_completadas': p_num, 'total_paginas': total_pages, 'evidencias': [e.model_dump() for e in page_evidences], 'elementos_visuales': [v.model_dump() for v in page_visuals], 'gemini_ms': round(page_gemini_ms, 2)})}\n\n"
                 await asyncio.sleep(0.02)
 
@@ -853,10 +931,23 @@ async def procesar_documento_stream(
                         )
                     )
 
-            total_dur_ms = round(total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms + 10.0, 2)
+            comparativa_motores = None
+            if motor_vision == "dual":
+                comparativa_motores = build_engine_benchmark(
+                    rapid_findings=final_hallazgos,
+                    rapid_duration_ms=total_rapid_ms if total_rapid_ms > 0 else (total_retrieval_ms or 15.0),
+                    florence_findings=all_florence_raw,
+                    florence_duration_ms=total_florence_ms,
+                    canonical_params=canonical_params,
+                )
+
+            total_dur_ms = round(
+                total_class_ms + total_prep_ms + total_retrieval_ms + total_render_ms + total_gemini_ms
+                + (total_florence_ms if motor_vision in ("florence2", "dual") else 0.0) + 10.0,
+                2
+            )
             job_status = EstadoCobertura.PARTIAL if failed_pages else EstadoCobertura.COMPLETE
 
-            # Build output and store in memory
             output = JobOutput(
                 pdf_hash=pdf_hash,
                 pipeline_version="2.2",
@@ -876,10 +967,12 @@ async def procesar_documento_stream(
                     preprocess_ms=round(total_prep_ms, 2),
                     retrieval_ms=round(total_retrieval_ms, 2),
                     render_ms=round(total_render_ms, 2),
-                    gemini_ms=round(total_gemini_ms, 2),
+                    gemini_ms=round(total_florence_ms if motor_vision in ("florence2", "dual") else total_gemini_ms, 2),
                     serialization_ms=3.0,
                     total_ms=total_dur_ms,
                 ),
+                motor_seleccionado=motor_vision,
+                comparativa_motores=comparativa_motores,
             )
 
             # Indexación L1 y persistencia en L0
@@ -899,12 +992,12 @@ async def procesar_documento_stream(
             set_l1_cache(pdf_hash, l1_entry)
 
             if job_status == EstadoCobertura.COMPLETE:
-                set_l0_cache(pdf_hash, query_hash, output)
+                set_l0_cache(pdf_hash, cache_query_key, output)
                 evaluate_and_create_l2_cache(pdf_hash, estimated_tokens=total_pages * 400)
 
             save_job_result(pdf_hash, output)
 
-            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': output.status.value, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'paginas_pendientes': output.paginas_pendientes, 'hallazgos': [h.model_dump() for h in final_hallazgos]})}\n\n"
+            yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': output.status.value, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'paginas_pendientes': output.paginas_pendientes, 'hallazgos': [h.model_dump() for h in final_hallazgos], 'motor_seleccionado': motor_vision, 'comparativa_motores': comparativa_motores})}\n\n"
         finally:
             doc.close()
 

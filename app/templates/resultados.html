@@ -31,6 +31,10 @@
 
         <div class="results-header-badges">
             <div class="metric-pill">
+                <span class="metric-label">Motor</span>
+                <span class="metric-value highlight-cyan">{{ resultado.motor_seleccionado | upper }}</span>
+            </div>
+            <div class="metric-pill">
                 <span class="metric-label">Caché</span>
                 <span class="metric-value badge-cache-{{ resultado.nivel_cache.value.lower() }}">{{ resultado.nivel_cache.value }}</span>
             </div>
@@ -44,6 +48,110 @@
             </div>
         </div>
     </div>
+
+    <!-- Panel de Comparativa Dual A/B (Benchmark en Tiempo Real) -->
+    {% if resultado.comparativa_motores %}
+    <div class="glass-card benchmark-container-card">
+        <div class="benchmark-header">
+            <div class="benchmark-title-group">
+                <span class="benchmark-pill">Benchmark A/B en Paralelo</span>
+                <h2 class="benchmark-title">Comparativa de Rendimiento y Coordenadas</h2>
+            </div>
+            <div class="speedup-badge-container">
+                <span class="speedup-label">Factor de Aceleración</span>
+                <span class="speedup-value">{{ resultado.comparativa_motores.factor_aceleracion }}x MÁS RÁPIDO</span>
+            </div>
+        </div>
+
+        <div class="benchmark-cards-grid">
+            <!-- RapidOCR Engine Card -->
+            <div class="benchmark-engine-card card-rapidocr">
+                <div class="engine-stat-header">
+                    <span class="engine-badge-tag tag-rapid">C++/AVX2 ONNX Runtime</span>
+                    <h3 class="engine-brand">{{ resultado.comparativa_motores.rapidocr.nombre }}</h3>
+                </div>
+                <div class="engine-stat-body">
+                    <div class="stat-big">
+                        <span class="stat-number">{{ resultado.comparativa_motores.rapidocr.duracion_total_ms | round(1) }}</span>
+                        <span class="stat-unit">ms</span>
+                    </div>
+                    <div class="stat-sub">
+                        <span>Hallazgos detectados: <strong>{{ resultado.comparativa_motores.rapidocr.hallazgos_detectados }}</strong></span>
+                        <span class="stat-desc-tag text-success">Cero-IA / Ultra Baja Latencia</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Florence-2 Engine Card -->
+            <div class="benchmark-engine-card card-florence">
+                <div class="engine-stat-header">
+                    <span class="engine-badge-tag tag-florence">PyTorch CPU Transformer</span>
+                    <h3 class="engine-brand">{{ resultado.comparativa_motores.florence2.nombre }}</h3>
+                </div>
+                <div class="engine-stat-body">
+                    <div class="stat-big">
+                        <span class="stat-number">{{ (resultado.comparativa_motores.florence2.duracion_total_ms / 1000) | round(2) }}</span>
+                        <span class="stat-unit">seg</span>
+                    </div>
+                    <div class="stat-sub">
+                        <span>Hallazgos detectados: <strong>{{ resultado.comparativa_motores.florence2.hallazgos_detectados }}</strong></span>
+                        <span class="stat-desc-tag text-info">Visión Multimodal VLM 230M</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Comparison Table -->
+        {% if resultado.comparativa_motores.filas_comparativas %}
+        <div class="benchmark-table-wrapper">
+            <table class="benchmark-table">
+                <thead>
+                    <tr>
+                        <th>Parámetro</th>
+                        <th>RapidOCR ONNX (Valor & Coords)</th>
+                        <th>Microsoft Florence-2 (Valor & Coords)</th>
+                        <th>Concordancia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in resultado.comparativa_motores.filas_comparativas %}
+                    <tr>
+                        <td class="param-cell">
+                            <span class="param-badge">{{ row.parametro }}</span>
+                        </td>
+                        <td>
+                            <div class="engine-result-val">
+                                <strong>{{ row.rapid_valor }}</strong>
+                                {% if row.rapid_bbox and row.rapid_bbox != [0.0, 0.0, 0.0, 0.0] %}
+                                <button type="button" class="coord-pill" onclick="window.highlightSourceInPdf(1, {{ row.rapid_bbox }}, 'RapidOCR: {{ row.parametro }}', '{{ row.rapid_valor }}')" title="Ver BBox RapidOCR en el visor">
+                                    <code>[{{ row.rapid_bbox[0] | round(1) }}, {{ row.rapid_bbox[1] | round(1) }}, {{ row.rapid_bbox[2] | round(1) }}, {{ row.rapid_bbox[3] | round(1) }}]</code>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="engine-result-val">
+                                <strong>{{ row.florence_valor }}</strong>
+                                {% if row.florence_bbox and row.florence_bbox != [0.0, 0.0, 0.0, 0.0] %}
+                                <button type="button" class="coord-pill" onclick="window.highlightSourceInPdf(1, {{ row.florence_bbox }}, 'Florence-2: {{ row.parametro }}', '{{ row.florence_valor }}')" title="Ver BBox Florence-2 en el visor">
+                                    <code>[{{ row.florence_bbox[0] | round(1) }}, {{ row.florence_bbox[1] | round(1) }}, {{ row.florence_bbox[2] | round(1) }}, {{ row.florence_bbox[3] | round(1) }}]</code>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="concordance-badge badge-{{ row.concordancia.lower().replace(' ', '-') }}">
+                                {{ row.concordancia }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <!-- SPLIT-VIEW: VISOR PDF REAL (IZQUIERDA) + INTELIGENCIA DOCUMENTAL (DERECHA) -->
     <div class="pydective-split-layout">
@@ -184,6 +292,7 @@
                             <tr>
                                 <th>Parámetro</th>
                                 <th>Valor Extraído</th>
+                                <th>Coordenadas BBox</th>
                                 <th>Método</th>
                                 <th>Score</th>
                                 <th>Citas en Visor</th>
@@ -211,6 +320,18 @@
                                         </button>
                                         {% endif %}
                                     </div>
+                                </td>
+                                <td class="bbox-cell">
+                                    {% if h.evidencias and h.evidencias[0].bbox %}
+                                    <div class="bbox-coords-box">
+                                        <code class="bbox-coords-badge" onclick="event.stopPropagation(); selectFindingRow(document.getElementById('finding-row-{{ finding_idx }}'), {{ h.evidencias[0].page }}, {{ h.evidencias[0].bbox }}, '{{ h.parametro }}', '{{ h.valor }}')" title="Enfocar en visor [x₀, y₀, x₁, y₁]">[{{ h.evidencias[0].bbox[0] | round(1) }}, {{ h.evidencias[0].bbox[1] | round(1) }}, {{ h.evidencias[0].bbox[2] | round(1) }}, {{ h.evidencias[0].bbox[3] | round(1) }}]</code>
+                                        <button type="button" class="btn-copy-bbox" onclick="event.stopPropagation(); navigator.clipboard.writeText('{{ h.evidencias[0].bbox }}'); copyFeedback(this);" title="Copiar coordenadas exactas al portapapeles">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        </button>
+                                    </div>
+                                    {% else %}
+                                    <span class="text-muted" style="font-size: 0.75rem;">—</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <span class="method-badge method-{{ h.metodo.value }}">
@@ -286,7 +407,7 @@
                                             title="Enfocar en visor: {{ img.clasificacion_semantica or 'objeto' }} (Pág {{ p.numero_pagina }}){% if img.contenido_decodificado %} - Contenido: {{ img.contenido_decodificado }}{% endif %}">
                                         {{ img.clasificacion_semantica or 'objeto' }}
                                         {% if img.contenido_decodificado %}
-                                        <span class="qr-code-indicator" title="{{ img.contenido_decodificado }}">🔗</span>
+                                        <span class="qr-code-indicator" title="{{ img.contenido_decodificado }}">[QR]</span>
                                         {% endif %}
                                     </button>
                                     {% endfor %}
@@ -307,6 +428,15 @@
 {% block extra_scripts %}
 <script src="/static/js/pdf_viewer.js"></script>
 <script>
+    function copyFeedback(btnEl) {
+        if (!btnEl) return;
+        const origHTML = btnEl.innerHTML;
+        btnEl.innerHTML = '<span style="font-size:0.7rem; color:#10b981; font-weight:bold;">Copiado</span>';
+        setTimeout(() => {
+            btnEl.innerHTML = origHTML;
+        }, 1500);
+    }
+
     function selectFindingRow(rowEl, pageNum, bbox, paramName, paramValue) {
         document.querySelectorAll('.finding-row').forEach(r => r.classList.remove('active-finding-row'));
         if (rowEl) rowEl.classList.add('active-finding-row');

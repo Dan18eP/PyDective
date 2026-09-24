@@ -95,6 +95,8 @@ class JobOutput(BaseModel):
     resultados_por_pagina: List[ResultadoPagina] = Field(default_factory=list)
     hallazgos: List[HallazgoEnriquecido] = Field(default_factory=list)
     telemetria: TelemetriaDesagregada = Field(default_factory=TelemetriaDesagregada)
+    motor_seleccionado: str = "rapidocr"
+    comparativa_motores: Optional[Dict[str, Any]] = None
 
 
 class ChatMessage(BaseModel):

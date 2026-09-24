@@ -379,7 +379,10 @@ class PydectivePdfViewer {
             let themeClass = 'grounding-theme-default';
             let icon = '[LOC]';
 
-            if (/total|valor|precio|canon|monto|saldo|subtotal|iva/.test(normLabel)) {
+            if (/foto|imagen|fotografia|k-9|perro|animal|rack|servidor|foto_pericial/.test(normLabel)) {
+                themeClass = 'grounding-theme-image';
+                icon = '[IMG]';
+            } else if (/total|valor|precio|canon|monto|saldo|subtotal|iva/.test(normLabel)) {
                 themeClass = 'grounding-theme-currency';
                 icon = '[$]';
             } else if (/arrendador|representante|cliente|notario|titular|parte|persona|contratante/.test(normLabel)) {

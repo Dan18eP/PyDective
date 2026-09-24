@@ -155,8 +155,40 @@
     </div>
     {% endif %}
 
+    <!-- PESTAÑAS SUPERIORES INTERCAMBIABLES (Dictamen y Hallazgos / Visor Pericial / Chatbot) -->
+    <div class="results-view-tabs-bar">
+        <div class="tabs-nav-group">
+            <button type="button" class="tab-btn active" id="tab-btn-split" onclick="switchMainResultsTab('split', this)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
+                <span>Vista Dual (Split)</span>
+            </button>
+            <button type="button" class="tab-btn" id="tab-btn-findings" onclick="switchMainResultsTab('findings', this)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <span>Dictamen y Hallazgos</span>
+            </button>
+            <button type="button" class="tab-btn" id="tab-btn-viewer" onclick="switchMainResultsTab('viewer', this)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <span>Visor Pericial</span>
+            </button>
+            <button type="button" class="tab-btn" id="tab-btn-chat" onclick="switchMainResultsTab('chat', this)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>Pydective Chatbot</span>
+            </button>
+        </div>
+
+        <!-- Filtros Rápidos de Hallazgos por Categoría -->
+        <div class="findings-filter-chips">
+            <span class="filter-label">Filtrar:</span>
+            <button type="button" class="filter-chip active" onclick="filterFindingsTable('all', this)">Todos ({{ resultado.hallazgos | length }})</button>
+            <button type="button" class="filter-chip" onclick="filterFindingsTable('monetario', this)">Montos / Total</button>
+            <button type="button" class="filter-chip" onclick="filterFindingsTable('partes', this)">Partes / Nombres</button>
+            <button type="button" class="filter-chip" onclick="filterFindingsTable('fechas', this)">Fechas</button>
+            <button type="button" class="filter-chip" onclick="filterFindingsTable('identificacion', this)">NIT / ID</button>
+        </div>
+    </div>
+
     <!-- SPLIT-VIEW: VISOR PDF REAL (IZQUIERDA) + INTELIGENCIA DOCUMENTAL (DERECHA) -->
-    <div class="pydective-split-layout">
+    <div class="pydective-split-layout" id="pydective-split-layout">
         
         <!-- COLUMNA IZQUIERDA: VISOR DE PDF NATIVO INTERACTIVO (RF-100, RF-101, RF-102) -->
         <div class="pdf-viewer-pane" id="pdf-viewer-pane">
@@ -221,10 +253,10 @@
         </div>
 
         <!-- COLUMNA DERECHA: PYDECTIVE CHAT + HALLAZGOS ESTRUCTURADOS -->
-        <div class="pydective-info-pane">
+        <div class="pydective-info-pane" id="pydective-info-pane">
             
-            <!-- Pydective Chat Interactivo con Grounding -->
-            <div class="glass-card chat-card chat-hero-card" style="height: 480px;">
+            <!-- Pydective Chat Interactivo con Grounding (Cajón Lateral Acoplable) -->
+            <div class="glass-card chat-card chat-hero-card" id="chat-collapsible-drawer">
                 <div class="chat-header">
                     <div class="chat-title-group">
                         <div class="chat-avatar">
@@ -240,15 +272,35 @@
                         </div>
                     </div>
 
-                    <div class="chat-engine-selector" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem;">
-                        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">Motor IA:</span>
-                        <select id="chat-engine-select" class="form-select form-select-sm" style="background: rgba(15, 23, 42, 0.85); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; padding: 0.2rem 0.6rem; font-size: 0.75rem; outline: none; cursor: pointer;">
-                            <option value="chain" selected>Cadena Automática (agy ➔ opencode ➔ gemini)</option>
-                            <option value="agy">agy (Terminal CLI)</option>
-                            <option value="opencode">opencode (Terminal CLI)</option>
-                            <option value="gemini">Google Gemini API (Cloud Multimodal)</option>
-                            <option value="local">LLM Local CPU (Qwen / Ollama)</option>
-                        </select>
+                    <div class="chat-header-actions">
+                        <!-- Modern Segmented Pill Selector for LLM Engine -->
+                        <div class="engine-segmented-control" id="chat-engine-segmented">
+                            <input type="hidden" id="chat-engine-select" value="chain">
+                            <button type="button" class="engine-pill-btn active" data-engine="chain" onclick="selectChatEngine('chain', this)" title="Cadena Automática Inteligente">
+                                <span class="engine-pill-dot"></span>
+                                <span>Auto</span>
+                            </button>
+                            <button type="button" class="engine-pill-btn" data-engine="agy" onclick="selectChatEngine('agy', this)" title="Antigravity CLI (agy)">
+                                <span>agy</span>
+                            </button>
+                            <button type="button" class="engine-pill-btn" data-engine="opencode" onclick="selectChatEngine('opencode', this)" title="OpenCode CLI (opencode)">
+                                <span>opencode</span>
+                            </button>
+                            <button type="button" class="engine-pill-btn" data-engine="gemini" onclick="selectChatEngine('gemini', this)" title="Google Gemini 2.0 Flash (Cloud Multimodal)">
+                                <span>Gemini</span>
+                            </button>
+                            <button type="button" class="engine-pill-btn" data-engine="local" onclick="selectChatEngine('local', this)" title="LLM Local CPU (Qwen / Ollama)">
+                                <span>Local</span>
+                            </button>
+                        </div>
+
+                        <!-- Sidebar Drawer Toggle Button (Expand/Collapse) -->
+                        <button type="button" class="btn-drawer-toggle" id="btn-chat-toggle-collapse" onclick="toggleChatDrawerCollapse()" title="Minimizar / Expandir Chat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="4 14 10 14 10 20"></polyline>
+                                <polyline points="20 10 14 10 14 4"></polyline>
+                            </svg>
+                        </button>
                     </div>
 
                     <!-- Sugerencias Rápidas de Preguntas -->
@@ -418,10 +470,24 @@
                                 <span class="visuals-label">Visuales:</span>
                                 <div class="visuals-tags">
                                     {% for img in p.metadatos_visuales %}
-                                    <button type="button" class="visual-tag visual-tag-interactive" 
-                                            onclick="window.highlightSourceInPdf({{ p.numero_pagina }}, {{ img.bbox }}, '{{ img.clasificacion_semantica or 'objeto' }}')"
-                                            title="Enfocar en visor: {{ img.clasificacion_semantica or 'objeto' }} (Pág {{ p.numero_pagina }}){% if img.contenido_decodificado %} - Contenido: {{ img.contenido_decodificado }}{% endif %}">
-                                        {{ img.clasificacion_semantica or 'objeto' }}
+                                    {% set sem = img.clasificacion_semantica or 'objeto' %}
+                                    <button type="button" class="visual-tag visual-tag-interactive tag-sem-{{ sem }}" 
+                                            onclick="window.highlightSourceInPdf({{ p.numero_pagina }}, {{ img.bbox }}, '{{ sem }}')"
+                                            title="Enfocar en visor: {{ sem }} (Pág {{ p.numero_pagina }}){% if img.contenido_decodificado %} - Contenido: {{ img.contenido_decodificado }}{% endif %}">
+                                        {% if sem == 'fotografia' or sem == 'imagen' %}
+                                        <span class="tag-icon">[FOTO]</span>
+                                        {% elif sem == 'firma_manuscrita' %}
+                                        <span class="tag-icon">[FIRMA]</span>
+                                        {% elif sem == 'sello_oficial' %}
+                                        <span class="tag-icon">[SELLO]</span>
+                                        {% elif sem == 'codigo_qr' %}
+                                        <span class="tag-icon">[QR]</span>
+                                        {% elif sem == 'codigo_barras' %}
+                                        <span class="tag-icon">[BARCODE]</span>
+                                        {% else %}
+                                        <span class="tag-icon">[DIAG]</span>
+                                        {% endif %}
+                                        <span>{{ sem }}</span>
                                         {% if img.contenido_decodificado %}
                                         <span class="qr-code-indicator" title="{{ img.contenido_decodificado }}">[QR]</span>
                                         {% endif %}
@@ -489,6 +555,87 @@
         if (window.highlightSourceInPdf) {
             window.highlightSourceInPdf(pageNum, bbox, paramName, paramValue);
         }
+    }
+
+    function switchMainResultsTab(tabName, btnEl) {
+        document.querySelectorAll('.tabs-nav-group .tab-btn').forEach(b => b.classList.remove('active'));
+        if (btnEl) btnEl.classList.add('active');
+
+        const splitLayout = document.getElementById('pydective-split-layout');
+        const pdfPane = document.getElementById('pdf-viewer-pane');
+        const infoPane = document.getElementById('pydective-info-pane');
+        const chatDrawer = document.getElementById('chat-collapsible-drawer');
+        const findingsCard = document.querySelector('.findings-card');
+        const pagesCard = document.querySelector('.pages-breakdown-card');
+
+        if (!splitLayout) return;
+
+        // Reset display states
+        splitLayout.classList.remove('layout-mode-viewer-only', 'layout-mode-findings-only', 'layout-mode-chat-only');
+        if (pdfPane) pdfPane.style.display = 'flex';
+        if (infoPane) infoPane.style.display = 'flex';
+        if (chatDrawer) chatDrawer.style.display = 'flex';
+        if (findingsCard) findingsCard.style.display = 'block';
+        if (pagesCard) pagesCard.style.display = 'block';
+
+        if (tabName === 'split') {
+            splitLayout.style.gridTemplateColumns = '1fr 1fr';
+        } else if (tabName === 'viewer') {
+            splitLayout.classList.add('layout-mode-viewer-only');
+            splitLayout.style.gridTemplateColumns = '1fr';
+            if (infoPane) infoPane.style.display = 'none';
+        } else if (tabName === 'findings') {
+            splitLayout.classList.add('layout-mode-findings-only');
+            splitLayout.style.gridTemplateColumns = '1fr';
+            if (pdfPane) pdfPane.style.display = 'none';
+            if (chatDrawer) chatDrawer.style.display = 'none';
+        } else if (tabName === 'chat') {
+            splitLayout.classList.add('layout-mode-chat-only');
+            splitLayout.style.gridTemplateColumns = '1fr';
+            if (pdfPane) pdfPane.style.display = 'none';
+            if (findingsCard) findingsCard.style.display = 'none';
+            if (pagesCard) pagesCard.style.display = 'none';
+        }
+
+        // Si el visor está visible, ajustar tamaño del canvas
+        if (window.activePdfViewer && tabName !== 'findings' && tabName !== 'chat') {
+            setTimeout(() => window.activePdfViewer.fitWidth(), 150);
+        }
+    }
+
+    function selectChatEngine(engineVal, btnEl) {
+        document.querySelectorAll('#chat-engine-segmented .engine-pill-btn').forEach(b => b.classList.remove('active'));
+        if (btnEl) btnEl.classList.add('active');
+        const hiddenInput = document.getElementById('chat-engine-select');
+        if (hiddenInput) hiddenInput.value = engineVal;
+    }
+
+    function toggleChatDrawerCollapse() {
+        const drawer = document.getElementById('chat-collapsible-drawer');
+        if (!drawer) return;
+        drawer.classList.toggle('drawer-collapsed');
+    }
+
+    function filterFindingsTable(category, chipEl) {
+        document.querySelectorAll('.findings-filter-chips .filter-chip').forEach(c => c.classList.remove('active'));
+        if (chipEl) chipEl.classList.add('active');
+
+        const rows = document.querySelectorAll('.finding-row');
+        rows.forEach(row => {
+            if (category === 'all') {
+                row.style.display = '';
+                return;
+            }
+            const paramText = (row.querySelector('.param-badge')?.textContent || '').toLowerCase();
+            let matches = false;
+
+            if (category === 'monetario' && /total|valor|precio|canon|monto|saldo|subtotal|iva/.test(paramText)) matches = true;
+            else if (category === 'partes' && /arrendador|representante|cliente|notario|titular|parte|persona|contratante|nombre/.test(paramText)) matches = true;
+            else if (category === 'fechas' && /fecha|date|emision|vencimiento|plazo|vigencia/.test(paramText)) matches = true;
+            else if (category === 'identificacion' && /nit|rut|cedula|identificacion|id/.test(paramText)) matches = true;
+
+            row.style.display = matches ? '' : 'none';
+        });
     }
 
     document.addEventListener("DOMContentLoaded", function() {

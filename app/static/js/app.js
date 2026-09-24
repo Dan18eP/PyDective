@@ -41,10 +41,16 @@ function initDropzone() {
 
     dropzone.addEventListener("drop", (e) => {
         const files = e.dataTransfer.files;
-        if (files.length > 0 && files[0].type === "application/pdf") {
-            handleFileSelect(files[0]);
-        } else {
-            showToast("Por favor carga un archivo PDF válido.", "warning");
+        if (files.length > 0) {
+            const f = files[0];
+            const name = (f.name || "").toLowerCase();
+            const validExts = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".docx", ".xlsx", ".txt"];
+            const isValid = validExts.some(ext => name.endsWith(ext)) || f.type.startsWith("image/") || f.type === "application/pdf";
+            if (isValid) {
+                handleFileSelect(f);
+            } else {
+                showToast("Formato no soportado. Usa PDF, Imágenes (PNG/JPG/TIFF), DOCX, XLSX o TXT.", "warning");
+            }
         }
     });
 
@@ -428,10 +434,11 @@ async function sendChatMessage() {
                     const bboxStr = JSON.stringify(ev.bbox || []);
                     const rawText = ev.text || "Evidencia";
 
-                    // Extraer etiqueta concisa para la pastilla (Diagrama, Firma, Sello, QR, etc.)
+                    // Extraer etiqueta concisa para la pastilla (Fotografía/Imagen, Diagrama, Firma, Sello, QR, etc.)
                     let tag = "Evidencia";
                     const lowerText = rawText.toLowerCase();
-                    if (lowerText.includes("diagrama") || lowerText.includes("grafico")) tag = "Diagrama";
+                    if (lowerText.includes("foto") || lowerText.includes("imagen") || lowerText.includes("canin") || lowerText.includes("perro")) tag = "Fotografía";
+                    else if (lowerText.includes("diagrama") || lowerText.includes("grafico")) tag = "Diagrama";
                     else if (lowerText.includes("firma")) tag = "Firma";
                     else if (lowerText.includes("sello")) tag = "Sello";
                     else if (lowerText.includes("qr")) tag = "Código QR";
@@ -491,7 +498,18 @@ async function sendChatMessage() {
             return `<button type="button" class="inline-page-tag" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pNum})" title="Ir a la Página ${pNum} en el visor">${match}</button>`;
         });
 
-        assistantBubble.innerHTML = `${engineBadge}<div class="chat-markdown-body">${renderedMarkdown}</div>${citasHtml}`;
+        const rawResponseEscaped = encodeURIComponent(data.respuesta || "");
+        const bubbleHeader = `
+            <div class="chat-bubble-top-bar">
+                ${engineBadge}
+                <button type="button" class="btn-copy-chat" onclick="copyChatResponse(decodeURIComponent('${rawResponseEscaped}'), this)" title="Copiar respuesta en Markdown">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span>Copiar</span>
+                </button>
+            </div>
+        `;
+
+        assistantBubble.innerHTML = `${bubbleHeader}<div class="chat-markdown-body">${renderedMarkdown}</div>${citasHtml}`;
         container.scrollTop = container.scrollHeight;
     } catch (err) {
         assistantBubble.innerHTML = `<p style="color: var(--danger);">[Error] ${err.message}</p>`;
@@ -501,6 +519,38 @@ async function sendChatMessage() {
         input.focus();
     }
 
+}
+
+function copyChatResponse(text, btnEl) {
+    if (!text) return;
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+            if (btnEl) {
+                const orig = btnEl.innerHTML;
+                btnEl.innerHTML = `<span style="color: #10b981; font-weight: bold;">Copiado</span>`;
+                setTimeout(() => { btnEl.innerHTML = orig; }, 1800);
+            }
+        }).catch(() => {
+            showToast("No se pudo copiar al portapapeles", "warning");
+        });
+    } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+            document.execCommand("copy");
+            if (btnEl) {
+                const orig = btnEl.innerHTML;
+                btnEl.innerHTML = `<span style="color: #10b981; font-weight: bold;">Copiado</span>`;
+                setTimeout(() => { btnEl.innerHTML = orig; }, 1800);
+            }
+        } catch (e) {}
+        document.body.removeChild(ta);
+    }
 }
 
 // Toast Notifications

@@ -69,6 +69,17 @@ def test_us13_semantic_classification_types():
     logo_label = classify_image_semantics(logo_meta, page_text="EMPRESA S.A.S.")
     assert logo_label == "logotipo"
 
+    # 4. Fotografía / Imagen de inspección
+    foto_meta = MetadatoImagen(
+        id_imagen="foto_01",
+        pagina=2,
+        tipo_fisico="raster",
+        bbox=[57.5, 110.0, 537.5, 468.4],
+        area_ratio=0.34,
+    )
+    foto_label = classify_image_semantics(foto_meta, page_text="ANEXO FOTOGRÁFICO: Inspección de unidad canina K-9")
+    assert foto_label == "fotografia"
+
 
 def test_us13_catalog_page_images_with_classification():
     pdf_path = FIXTURES_DIR / "mixto_sello_firma.pdf"

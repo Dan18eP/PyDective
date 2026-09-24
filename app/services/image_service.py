@@ -148,11 +148,11 @@ def classify_image_semantics(
     if is_vector and (w >= 320.0 or h >= 120.0 or image_meta.area_ratio >= 0.08):
         return "diagrama"
 
-    # 2. Código QR (reconocido por aspecto cuadrado y palabras clave en el entorno o documento)
+    # 2. Código QR (reconocido por aspecto cuadrado y palabras clave EXPLÍCITAS de QR en el entorno inmediato o documento)
     has_qr_text = any(
-        kw in full_text for kw in ("qr", "cufe", "dian", "verificacion", "verificación", "código qr", "codigo qr", "factura electrónica", "factura electronica")
-    )
-    if (0.70 <= aspect_ratio <= 1.40) and (35.0 <= w <= 650.0 and 35.0 <= h <= 650.0) and has_qr_text:
+        kw in full_text for kw in ("código qr", "codigo qr", "qr code", "cufe", "factura electrónica", "factura electronica")
+    ) or any(kw in local_text for kw in ("qr", "código qr", "codigo qr"))
+    if (0.75 <= aspect_ratio <= 1.30) and (35.0 <= w <= 260.0 and 35.0 <= h <= 260.0) and has_qr_text:
         return "codigo_qr"
 
     # 3. Sello oficial notarial o de certificación
@@ -186,22 +186,26 @@ def classify_image_semantics(
         if (aspect_ratio >= 2.2 and h <= 100 and w <= 350) or has_barcode_text:
             return "codigo_barras"
 
-    # Si el contexto local describe explícitamente gráficos financieros o diagramas
+    # 6. Fotografía / Imagen pericial, técnica o de inspección
+    if not is_vector:
+        page_header = page_text.lstrip()[:250].lower()
+        has_annex_photo_header = any(k in page_header for k in ("anexo fotográfico", "anexo fotografico", "registro fotográfico", "acta de inspección", "acta de inspeccion", "inspección", "inspeccion"))
+        has_photo_text = any(
+            kw in local_text for kw in ("foto", "fotografia", "fotografía", "imagen", "imágenes", "imagenes", "rack", "servidor", "data center", "datacenter", "k-9", "canin", "perro", "perros", "evidencia visual", "inspección")
+        ) or has_annex_photo_header
+        if (w >= 140 and h >= 80) and (has_photo_text or image_meta.area_ratio >= 0.15):
+            return "fotografia"
+
+    # 7. Si el contexto local describe explícitamente gráficos financieros o diagramas
     has_diagram_keywords = any(k in local_text for k in ("presupuesto", "financiero", "diagrama", "flujo", "arquitectura", "cronograma", "distribución porcentual", "distribucion porcentual"))
     if has_diagram_keywords or re.search(r"(?<!foto)gr[aá]fico\b", local_text):
         return "diagrama"
 
-    # 6. Fotografía pericial o técnica
-    if not is_vector:
-        page_header = page_text.lstrip()[:200].lower()
-        has_annex_photo_header = any(k in page_header for k in ("anexo fotográfico", "anexo fotografico", "registro fotográfico", "acta de inspección", "acta de inspeccion"))
-        has_photo_text = any(
-            kw in local_text for kw in ("foto", "fotografia", "fotografía", "rack", "servidor", "data center", "datacenter")
-        ) or has_annex_photo_header
-        if (w >= 180 and h >= 100) and has_photo_text:
-            return "fotografia"
+    # 8. Si es una imagen ráster sin otra clasificación específica, clasificar como 'imagen' / 'fotografia'
+    if not is_vector and (w >= 100 or h >= 80):
+        return "fotografia"
 
-    # 7. Diagrama / Gráfico general por defecto
+    # 9. Diagrama / Gráfico general por defecto
     return "diagrama"
 
 

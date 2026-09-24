@@ -304,4 +304,115 @@ def catalog_page_images(
             except Exception:
                 pass
 
+    # Salvaguarda VIS-01: Deteccion de firmas y sellos por segmentacion morfologica cromatica
+    has_signature = any(i.clasificacion_semantica == "firma_manuscrita" for i in images)
+    has_seal = any(i.clasificacion_semantica == "sello_oficial" for i in images)
+    has_full_page_raster = any(i.area_ratio >= 0.40 for i in images)
+
+    if (not has_signature or not has_seal) and (has_full_page_raster or not full_text.strip()):
+        morph_items = detect_morphological_visual_elements(page)
+        added_specific = False
+        for item in morph_items:
+            if item.clasificacion_semantica == "firma_manuscrita" and not has_signature:
+                images.append(item)
+                has_signature = True
+                added_specific = True
+            elif item.clasificacion_semantica == "sello_oficial" and not has_seal:
+                images.append(item)
+                has_seal = True
+                added_specific = True
+
+        # Si se detectaron elementos especificos dentro del escaneo, filtrar lienzo de fondo redundante
+        if added_specific:
+            images = [i for i in images if not (i.area_ratio >= 0.75 and i.clasificacion_semantica == "diagrama")]
+
     return images
+
+
+def detect_morphological_visual_elements(
+    page: pymupdf.Page,
+    min_sig_area_px: float = 60.0,
+    min_seal_area_px: float = 120.0,
+) -> List[MetadatoImagen]:
+    """
+    Segmentacion morfologica y cromatica de firmas y sellos en imagenes puras y escaneos (VIS-01).
+    Utiliza OpenCV y conversion HSV para detectar trazos de tinta manuscrita (azul) y sellos notariales (rojo/violeta).
+    """
+    results: List[MetadatoImagen] = []
+    page_rect = page.rect
+    page_area = max(1.0, page_rect.width * page_rect.height)
+    page_num = page.number + 1
+
+    try:
+        import cv2
+        import numpy as np
+
+        pix = page.get_pixmap(dpi=120)
+        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+        if pix.n == 4:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGBA2BGR)
+        elif pix.n == 1:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+        else:
+            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
+
+        hsv = cv2.cvtColor(img_arr, cv2.COLOR_BGR2HSV)
+        sat = hsv[:, :, 1]
+        scale_x = pix.width / page_rect.width
+        scale_y = pix.height / page_rect.height
+
+        # 1. Mascara de tinta azul (firmas manuscritas)
+        blue_mask = ((hsv[:, :, 0] >= 90) & (hsv[:, :, 0] <= 135) & (sat > 35)).astype(np.uint8) * 255
+        blue_cnts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in blue_cnts:
+            x, y, w, h = cv2.boundingRect(c)
+            if w > 40 and h > 12 and (w / h >= 1.3) and cv2.contourArea(c) > min_sig_area_px:
+                if (y / scale_y) > 180.0:
+                    sig_bbox = [
+                        round(x / scale_x, 2),
+                        round(y / scale_y, 2),
+                        round((x + w) / scale_x, 2),
+                        round((y + h) / scale_y, 2),
+                    ]
+                    sig_area = (sig_bbox[2] - sig_bbox[0]) * (sig_bbox[3] - sig_bbox[1])
+                    results.append(
+                        MetadatoImagen(
+                            id_imagen=f"sig_p{page_num}_{len(results)+1:02d}",
+                            pagina=page_num,
+                            tipo_fisico="raster",
+                            bbox=sig_bbox,
+                            area_ratio=round(sig_area / page_area, 4),
+                            clasificacion_semantica="firma_manuscrita",
+                        )
+                    )
+                    break
+
+        # 2. Mascara de tinta roja o carmesi (sellos notariales u oficiales)
+        red_mask = (((hsv[:, :, 0] <= 15) | (hsv[:, :, 0] >= 165)) & (sat > 35)).astype(np.uint8) * 255
+        red_cnts, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in red_cnts:
+            x, y, w, h = cv2.boundingRect(c)
+            if w > 30 and h > 30 and (0.55 <= w / h <= 1.8) and cv2.contourArea(c) > min_seal_area_px:
+                seal_bbox = [
+                    round(x / scale_x, 2),
+                    round(y / scale_y, 2),
+                    round((x + w) / scale_x, 2),
+                    round((y + h) / scale_y, 2),
+                ]
+                seal_area = (seal_bbox[2] - seal_bbox[0]) * (seal_bbox[3] - seal_bbox[1])
+                results.append(
+                    MetadatoImagen(
+                        id_imagen=f"seal_p{page_num}_{len(results)+1:02d}",
+                        pagina=page_num,
+                        tipo_fisico="raster",
+                        bbox=seal_bbox,
+                        area_ratio=round(seal_area / page_area, 4),
+                        clasificacion_semantica="sello_oficial",
+                    )
+                )
+                break
+    except Exception:
+        pass
+
+    return results
+

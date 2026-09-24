@@ -116,3 +116,27 @@ def test_catalog_page_images_classifies_and_decodes_qr():
     assert qr_item.contenido_decodificado == "https://www.qrcode-monkey.com"
 
     doc.close()
+
+
+def test_detect_morphological_visual_elements_on_scan_and_image():
+    from app.services.image_service import detect_morphological_visual_elements
+    from app.services.ingestion_service import validate_and_read_pdf
+
+    fixtures_100_dir = Path(__file__).resolve().parent.parent / "fixtures_100"
+    scan_path = fixtures_100_dir / "doc_051_escaneo.pdf"
+    if scan_path.exists():
+        doc = pymupdf.open(str(scan_path))
+        page = doc[0]
+        elements = detect_morphological_visual_elements(page)
+        assert any(e.clasificacion_semantica == "sello_oficial" for e in elements)
+        doc.close()
+
+    img_path = fixtures_100_dir / "doc_061_img.png"
+    if img_path.exists():
+        data = img_path.read_bytes()
+        _, doc, _ = validate_and_read_pdf(data, filename="doc_061_img.png")
+        page = doc[0]
+        elements = detect_morphological_visual_elements(page)
+        assert any(e.clasificacion_semantica == "firma_manuscrita" for e in elements)
+        doc.close()
+

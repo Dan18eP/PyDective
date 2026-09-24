@@ -5,8 +5,8 @@
       "needs_ai": 10
     },
     "accuracy": "0/30 (0.0%)",
-    "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 10.62,
+    "visual_accuracy": "10/10 (100.0%)",
+    "avg_latency_ms": 10.46,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -67,8 +67,8 @@
       "needs_ai": 10
     },
     "accuracy": "0/30 (0.0%)",
-    "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 30.43,
+    "visual_accuracy": "10/10 (100.0%)",
+    "avg_latency_ms": 26.47,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -129,8 +129,8 @@
       "needs_ai": 10
     },
     "accuracy": "0/30 (0.0%)",
-    "visual_accuracy": "0/10 (0.0%)",
-    "avg_latency_ms": 11.78,
+    "visual_accuracy": "10/10 (100.0%)",
+    "avg_latency_ms": 11.79,
     "encoding_issues_count": 10,
     "encoding_issues": [
       [
@@ -191,8 +191,8 @@
       "needs_ai": 5
     },
     "accuracy": "0/15 (0.0%)",
-    "visual_accuracy": "0/5 (0.0%)",
-    "avg_latency_ms": 28.87,
+    "visual_accuracy": "5/5 (100.0%)",
+    "avg_latency_ms": 31.61,
     "encoding_issues_count": 5,
     "encoding_issues": [
       [
@@ -229,7 +229,7 @@
     },
     "accuracy": "15/15 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 34.57,
+    "avg_latency_ms": 34.28,
     "encoding_issues_count": 0,
     "encoding_issues": []
   },
@@ -240,7 +240,7 @@
     },
     "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 28.7,
+    "avg_latency_ms": 27.65,
     "encoding_issues_count": 0,
     "encoding_issues": []
   },
@@ -251,7 +251,7 @@
     },
     "accuracy": "20/20 (100.0%)",
     "visual_accuracy": "N/A",
-    "avg_latency_ms": 5.69,
+    "avg_latency_ms": 5.86,
     "encoding_issues_count": 0,
     "encoding_issues": []
   }

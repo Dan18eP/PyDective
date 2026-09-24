@@ -349,7 +349,7 @@ class PydectivePdfViewer {
      * Visual Grounding Forense:
      * Salta a una página y resalta con exactitud matemática el elemento (texto o imagen).
      */
-    highlightSource(pageNum, bbox, label = 'Evidencia Documental') {
+    highlightSource(pageNum, bbox, label = 'Evidencia Documental', valueSnippet = '') {
         const page = parseInt(pageNum, 10);
         if (isNaN(page) || page < 1 || page > this.totalPages) return;
 
@@ -362,21 +362,57 @@ class PydectivePdfViewer {
         const oldG = document.querySelectorAll('.pdf-grounding-target');
         oldG.forEach(el => el.remove());
 
+        // Resaltar brevemente la tarjeta de la página enfocada
+        const card = document.getElementById(`pdf-page-card-${page}`);
+        if (card) {
+            card.classList.add('pdf-page-card-focused');
+            setTimeout(() => card.classList.remove('pdf-page-card-focused'), 2500);
+        }
+
         if (Array.isArray(bbox) && bbox.length === 4) {
             const [x0, y0, x1, y1] = bbox;
             const scaleX = parseFloat(pInfo.overlay.style.width) / pInfo.pageWidthPts;
             const scaleY = parseFloat(pInfo.overlay.style.height) / pInfo.pageHeightPts;
 
-            const gBox = document.createElement('div');
-            gBox.className = 'pdf-grounding-target animate-pulse-glow';
-            gBox.style.left = `${x0 * scaleX}px`;
-            gBox.style.top = `${y0 * scaleY}px`;
-            gBox.style.width = `${Math.max(10, (x1 - x0) * scaleX)}px`;
-            gBox.style.height = `${Math.max(12, (y1 - y0) * scaleY)}px`;
+            // Determinar categoría cromática del parámetro
+            const normLabel = (label || '').toLowerCase();
+            let themeClass = 'grounding-theme-default';
+            let icon = '📍';
 
+            if (/total|valor|precio|canon|monto|saldo|subtotal|iva/.test(normLabel)) {
+                themeClass = 'grounding-theme-currency';
+                icon = '💰';
+            } else if (/arrendador|representante|cliente|notario|titular|parte|persona|contratante/.test(normLabel)) {
+                themeClass = 'grounding-theme-entity';
+                icon = '👤';
+            } else if (/fecha|date|emision|vencimiento|plazo/.test(normLabel)) {
+                themeClass = 'grounding-theme-date';
+                icon = '📅';
+            } else if (/nit|rut|cedula|identificacion|id/.test(normLabel)) {
+                themeClass = 'grounding-theme-id';
+                icon = '🆔';
+            } else if (/firma|sello|qr|codigo/.test(normLabel)) {
+                themeClass = 'grounding-theme-visual';
+                icon = '🔏';
+            }
+
+            const gBox = document.createElement('div');
+            gBox.className = `pdf-grounding-target animate-pulse-glow ${themeClass}`;
+            gBox.style.left = `${Math.max(0, x0 * scaleX - 3)}px`;
+            gBox.style.top = `${Math.max(0, y0 * scaleY - 3)}px`;
+            gBox.style.width = `${Math.max(14, (x1 - x0) * scaleX + 6)}px`;
+            gBox.style.height = `${Math.max(14, (y1 - y0) * scaleY + 6)}px`;
+
+            // Onda de radar expansiva para guiar la vista al punto exacto
+            const ripple = document.createElement('div');
+            ripple.className = 'pdf-grounding-ripple';
+            gBox.appendChild(ripple);
+
+            // Badge superior enriquecido con icono y fragmento de valor
             const badge = document.createElement('span');
             badge.className = 'pdf-grounding-label';
-            badge.innerText = label;
+            const displaySnippet = valueSnippet ? `: ${valueSnippet.length > 25 ? valueSnippet.substring(0, 22) + '...' : valueSnippet}` : '';
+            badge.innerHTML = `<span class="badge-icon">${icon}</span> <strong class="badge-param">${label}</strong>${displaySnippet}`;
             gBox.appendChild(badge);
 
             pInfo.overlay.appendChild(gBox);
@@ -386,7 +422,6 @@ class PydectivePdfViewer {
             }, 100);
         } else {
             // Si no hay bbox preciso, hacer scroll a la cabecera de la página
-            const card = document.getElementById(`pdf-page-card-${page}`);
             if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }
@@ -465,9 +500,9 @@ class PydectivePdfViewer {
 // Inicialización global accesible para templates y chat
 window.PydectivePdfViewer = PydectivePdfViewer;
 
-window.highlightSourceInPdf = function(pageNum, bbox, label) {
+window.highlightSourceInPdf = function(pageNum, bbox, label, valueSnippet = '') {
     if (window.activePdfViewer) {
-        window.activePdfViewer.highlightSource(pageNum, bbox, label);
+        window.activePdfViewer.highlightSource(pageNum, bbox, label, valueSnippet);
     } else {
         console.warn('[PyDective] Visor de PDF no inicializado aún.');
     }

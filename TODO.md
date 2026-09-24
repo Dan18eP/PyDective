@@ -27,6 +27,7 @@
 ## 💡 Opcional (Refactorizaciones y Experiencia de Desarrollo)
 
 - [ ] **XLSX-02 (Plantilla de Renderizado Grid en Conversión Excel):** Generar grillas con coordenadas X calculadas por ancho de columna en lugar de concatenación plana con `|` en `_convert_xlsx_to_pdf_in_memory()`.
+- [x] **UI-02 (Resaltado y Enfoque de Evidencias en Visor PDF y Tabla):** Añadir resaltado temático de grounding por tipo de parámetro (moneda, entidad, fecha, ID, visual), balizas con pulsación radiante (`.pdf-grounding-ripple`), selección bidireccional interactiva entre filas de hallazgos y el visor de documentos, y búsqueda de coincidencias de alto contraste.
 - [ ] **DEV-01 (Scripts de CLI para Entorno Windows):** Incorporar script `run_server.ps1` o Makefile para empaquetar comandos comunes de `uv` con detección automática del ejecutable en `%USERPROFILE%\.local\bin`.
 - [ ] **UI-01 (Feedback Visual de Errores de Conexión Redis):** Mejorar telemetría de UI cuando Redis no está disponible y el sistema cae elegantemente en memoria local (in-memory fallback).
 

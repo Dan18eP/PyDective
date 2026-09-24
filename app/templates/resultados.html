@@ -191,7 +191,13 @@
                         </thead>
                         <tbody>
                             {% for h in resultado.hallazgos %}
-                            <tr class="finding-row finding-row-interactive">
+                            {% set finding_idx = loop.index %}
+                            <tr class="finding-row finding-row-interactive" id="finding-row-{{ finding_idx }}"
+                                {% if h.evidencias %}
+                                onclick="selectFindingRow(this, {{ h.evidencias[0].page }}, {{ h.evidencias[0].bbox }}, '{{ h.parametro }}', '{{ h.valor }}')"
+                                style="cursor: pointer;"
+                                title="Haz clic para enfocar este hallazgo en el visor"
+                                {% endif %}>
                                 <td class="param-cell">
                                     <span class="param-badge">{{ h.parametro }}</span>
                                 </td>
@@ -199,7 +205,7 @@
                                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
                                         <strong>{{ h.valor }}</strong>
                                         {% if h.valor and h.valor != 'No encontrado' %}
-                                        <button type="button" class="btn-search-trigger" onclick="window.triggerSearchInPdf('{{ h.valor }}')" title="Buscar coincidencias en el visor">
+                                        <button type="button" class="btn-search-trigger" onclick="event.stopPropagation(); window.triggerSearchInPdf('{{ h.valor }}')" title="Buscar coincidencias en el visor">
                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                                             <span>Buscar</span>
                                         </button>
@@ -223,7 +229,7 @@
                                     <div class="citations-list">
                                         {% for ev in h.evidencias %}
                                         <button type="button" class="citation-pill citation-pill-interactive" 
-                                                onclick="window.highlightSourceInPdf({{ ev.page }}, {{ ev.bbox }}, '{{ h.parametro }}')"
+                                                onclick="event.stopPropagation(); selectFindingRow(document.getElementById('finding-row-{{ finding_idx }}'), {{ ev.page }}, {{ ev.bbox }}, '{{ h.parametro }}', '{{ h.valor }}')"
                                                 title="Localizar en página {{ ev.page }} (bbox: {{ ev.bbox }})">
                                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                                             <span>Pág {{ ev.page }}</span>
@@ -301,6 +307,14 @@
 {% block extra_scripts %}
 <script src="/static/js/pdf_viewer.js"></script>
 <script>
+    function selectFindingRow(rowEl, pageNum, bbox, paramName, paramValue) {
+        document.querySelectorAll('.finding-row').forEach(r => r.classList.remove('active-finding-row'));
+        if (rowEl) rowEl.classList.add('active-finding-row');
+        if (window.highlightSourceInPdf) {
+            window.highlightSourceInPdf(pageNum, bbox, paramName, paramValue);
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", function() {
         const hashEl = document.getElementById("doc-pdf-hash");
         if (hashEl) {

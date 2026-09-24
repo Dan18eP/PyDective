@@ -325,7 +325,7 @@
                                     {% if h.evidencias and h.evidencias[0].bbox %}
                                     <div class="bbox-coords-box">
                                         <code class="bbox-coords-badge" onclick="event.stopPropagation(); selectFindingRow(document.getElementById('finding-row-{{ finding_idx }}'), {{ h.evidencias[0].page }}, {{ h.evidencias[0].bbox }}, '{{ h.parametro }}', '{{ h.valor }}')" title="Enfocar en visor [x₀, y₀, x₁, y₁]">[{{ h.evidencias[0].bbox[0] | round(1) }}, {{ h.evidencias[0].bbox[1] | round(1) }}, {{ h.evidencias[0].bbox[2] | round(1) }}, {{ h.evidencias[0].bbox[3] | round(1) }}]</code>
-                                        <button type="button" class="btn-copy-bbox" onclick="event.stopPropagation(); navigator.clipboard.writeText('{{ h.evidencias[0].bbox }}'); copyFeedback(this);" title="Copiar coordenadas exactas al portapapeles">
+                                        <button type="button" class="btn-copy-bbox" onclick="event.stopPropagation(); copyToClipboard('{{ h.evidencias[0].bbox }}', this);" title="Copiar coordenadas exactas al portapapeles">
                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                                         </button>
                                     </div>
@@ -428,6 +428,36 @@
 {% block extra_scripts %}
 <script src="/static/js/pdf_viewer.js"></script>
 <script>
+    function copyToClipboard(text, btn) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(() => {
+                copyFeedback(btn);
+            }).catch(() => {
+                fallbackCopyText(text, btn);
+            });
+        } else {
+            fallbackCopyText(text, btn);
+        }
+    }
+
+    function fallbackCopyText(text, btn) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand("copy");
+            copyFeedback(btn);
+        } catch (err) {
+            console.error("Fallback copy failed", err);
+        }
+        document.body.removeChild(textArea);
+    }
+
     function copyFeedback(btnEl) {
         if (!btnEl) return;
         const origHTML = btnEl.innerHTML;

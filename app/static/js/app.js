@@ -1,6 +1,6 @@
 // PyDective Application Logic
 
-let activeParams = ["total", "fecha", "nit"];
+let activeParams = ["nombre", "total", "fecha", "nit"];
 let selectedFile = null;
 let chatHistory = [];
 let jobStartTime = null;
@@ -464,3 +464,46 @@ function showToast(message, type = "info") {
         setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
+
+// Cross-Platform Clipboard Copy (Compatible con Linux Wayland/X11 y Windows)
+function copyToClipboard(text, btn) {
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+            copyFeedback(btn);
+        }).catch(() => {
+            fallbackCopyText(text, btn);
+        });
+    } else {
+        fallbackCopyText(text, btn);
+    }
+}
+
+function fallbackCopyText(text, btn) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        document.execCommand("copy");
+        copyFeedback(btn);
+    } catch (err) {
+        showToast("No se pudo copiar automáticamente al portapapeles", "warning");
+    }
+    document.body.removeChild(textArea);
+}
+
+function copyFeedback(btn) {
+    if (!btn) return;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Copiado`;
+    btn.classList.add("copied");
+    setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.classList.remove("copied");
+    }, 1500);
+}
+

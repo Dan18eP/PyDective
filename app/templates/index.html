@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}PyDective — Análisis y Extracción Forense de Documentos{% endblock %}
+{% block title %}PyDective - Análisis y Extracción Forense de Documentos{% endblock %}
 
 {% block content %}
 <section class="hero-section">
@@ -73,10 +73,14 @@
                     <div class="preset-chips-group">
                         <span class="presets-label">Sugeridos:</span>
                         <div class="chips-container" id="preset-chips">
-                            <button type="button" class="preset-chip" onclick="addParamTag('total')">+ Total</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('nombre')">+ Nombre / Titular</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('notario')">+ Notario</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('fecha')">+ Fecha</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('valor')">+ Valor Declarado</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('total')">+ Total</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('nit')">+ NIT / Cédula</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('arrendador')">+ Arrendador</button>
+                            <button type="button" class="preset-chip" onclick="addParamTag('cliente')">+ Cliente</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('diagnostico')">+ Diagnóstico</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('vigencia')">+ Vigencia</button>
                             <button type="button" class="preset-chip" onclick="addParamTag('clausula penal')">+ Cláusula Penal</button>

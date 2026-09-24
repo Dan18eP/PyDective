@@ -1,9 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-PyDective — Script de Arranque del Servidor y Aplicacion
+PyDective - Script de Arranque del Servidor y Aplicacion
 Inicia la API FastAPI con Uvicorn, verifica la configuracion del entorno,
 gestiona el ciclo de vida del modelo LLM local (Ollama), comprueba los motores
 de vision (RapidOCR / Florence-2) y muestra las rutas de acceso del sistema.
+Compatible con entornos Linux (Ubuntu, Debian, Fedora, Arch) y Windows.
 """
 
 import sys
@@ -11,6 +12,7 @@ import os
 import time
 import json
 import shutil
+import platform
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -19,28 +21,45 @@ ROOT_DIR = Path(__file__).resolve().parent
 
 
 def find_uv_executable() -> str | None:
-    uv_path = shutil.which("uv")
-    if uv_path:
-        return uv_path
+    # 1. Busqueda en PATH del sistema
+    for name in ("uv", "uv.exe"):
+        uv_path = shutil.which(name)
+        if uv_path:
+            return uv_path
 
+    # 2. Rutas estandar en Linux / macOS / Windows
     user_home = Path.home()
-    cand_windows = user_home / ".local" / "bin" / "uv.exe"
-    if cand_windows.exists():
-        return str(cand_windows)
-
-    cand_cargo = user_home / ".cargo" / "bin" / "uv.exe"
-    if cand_cargo.exists():
-        return str(cand_cargo)
+    is_windows = sys.platform == "win32"
+    candidates = [
+        user_home / ".local" / "bin" / ("uv.exe" if is_windows else "uv"),
+        user_home / ".cargo" / "bin" / ("uv.exe" if is_windows else "uv"),
+        user_home / ".local" / "bin" / "uv",
+        user_home / ".cargo" / "bin" / "uv",
+        Path("/usr/local/bin/uv"),
+        Path("/usr/bin/uv"),
+        Path("/snap/bin/uv"),
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return str(cand)
 
     return None
 
 
 def find_ollama_executable() -> str | None:
     """Busca el ejecutable de Ollama en el PATH o en rutas estandar de Windows/Linux."""
-    bin_path = shutil.which("ollama")
-    if bin_path:
-        return bin_path
+    for name in ("ollama", "ollama.exe"):
+        bin_path = shutil.which(name)
+        if bin_path:
+            return bin_path
 
+    # Rutas estandar en Linux
+    for linux_path in ("/usr/local/bin/ollama", "/usr/bin/ollama", "/bin/ollama", "/snap/bin/ollama"):
+        cand_linux = Path(linux_path)
+        if cand_linux.exists():
+            return str(cand_linux)
+
+    # Rutas estandar en Windows
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         cand = Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe"
@@ -92,14 +111,18 @@ def ensure_local_llm_service(model_name: str = "qwen2.5:3b") -> subprocess.Popen
     print(f"  [INICIO]  Servidor Ollama:     Iniciando daemon local ({ollama_bin} serve)...")
     try:
         creation_flags = 0
+        start_new_session = False
         if sys.platform == "win32":
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            start_new_session = True
 
         proc = subprocess.Popen(
             [ollama_bin, "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creation_flags,
+            start_new_session=start_new_session,
         )
 
         # Esperar hasta 6.0 segundos a que el servidor comience a responder

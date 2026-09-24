@@ -1,7 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-PyDective — Launcher Principal (run.py)
-Punto de entrada directo que delega la inicialización completa a run_app.py.
+PyDective - Launcher Principal (run.py)
+Punto de entrada directo que delega la inicializacion completa a run_app.py.
+Compatible con entornos Linux y Windows.
 """
 
 from run_app import main

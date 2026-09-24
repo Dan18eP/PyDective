@@ -1,13 +1,15 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 PyDective - Script de Instalacion Automatizada de Dependencias
 Verifica el entorno de ejecucion, detecta gestores (uv / pip), instala las librerias
 requeridas segun pyproject.toml y configura el entorno de trabajo y motores de vision.
+Compatible con entornos Linux (Ubuntu, Debian, Fedora, Arch) y Windows.
 """
 
 import sys
 import os
 import shutil
+import platform
 import subprocess
 from pathlib import Path
 
@@ -41,21 +43,43 @@ def check_python_version():
     print_ok(f"Python {major}.{minor}.{sys.version_info.micro} detectado (compatible)")
 
 
+def check_system_platform():
+    print_step("Detectando sistema operativo y arquitectura...")
+    os_name = platform.system()
+    arch = platform.machine()
+    print_ok(f"Plataforma detectada: {os_name} ({arch})")
+
+    if sys.platform.startswith("linux"):
+        print_ok("Modo Linux/POSIX activo.")
+        uv_bin = find_uv_executable()
+        if not uv_bin:
+            print_warn("Gestor 'uv' no detectado en PATH. Puedes instalarlo con:")
+            print_warn("  curl -LsSf https://astral.sh/uv/install.sh | sh")
+            print_warn("O reiniciar tu terminal si ya lo instalaste previamente.")
+
+
 def find_uv_executable() -> str | None:
-    # 1. En PATH
-    uv_path = shutil.which("uv")
-    if uv_path:
-        return uv_path
+    # 1. Busqueda en PATH del sistema
+    for name in ("uv", "uv.exe"):
+        uv_path = shutil.which(name)
+        if uv_path:
+            return uv_path
 
-    # 2. Rutas comunes en Windows
+    # 2. Rutas estandar en Linux / macOS / Windows
     user_home = Path.home()
-    cand_windows = user_home / ".local" / "bin" / "uv.exe"
-    if cand_windows.exists():
-        return str(cand_windows)
-
-    cand_cargo = user_home / ".cargo" / "bin" / "uv.exe"
-    if cand_cargo.exists():
-        return str(cand_cargo)
+    is_windows = sys.platform == "win32"
+    candidates = [
+        user_home / ".local" / "bin" / ("uv.exe" if is_windows else "uv"),
+        user_home / ".cargo" / "bin" / ("uv.exe" if is_windows else "uv"),
+        user_home / ".local" / "bin" / "uv",
+        user_home / ".cargo" / "bin" / "uv",
+        Path("/usr/local/bin/uv"),
+        Path("/usr/bin/uv"),
+        Path("/snap/bin/uv"),
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return str(cand)
 
     return None
 
@@ -177,6 +201,7 @@ def main():
     print("=" * 70)
 
     check_python_version()
+    check_system_platform()
     setup_environment_files()
     install_dependencies()
     verify_installation()

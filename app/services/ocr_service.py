@@ -126,3 +126,30 @@ def extract_page_ocr(
 
     full_text = "\n".join(lines)
     return full_text, boxes
+
+
+def inject_ocr_text_layer(page: pymupdf.Page, ocr_boxes: List[Dict[str, Any]]) -> None:
+    """
+    Inyecta una capa de texto invisible (render_mode=3) con escala tipografica adaptable.
+    Asegura que todo el texto detectado por el OCR encaje en su bounding box sin ser descartado.
+    """
+    for b in ocr_boxes:
+        bbox = b.get("bbox")
+        text = b.get("text", "")
+        if not bbox or not text:
+            continue
+        try:
+            rect = pymupdf.Rect(bbox)
+            inserted = False
+            # Cascada decreciente de tamano de fuente para evitar rechazo por desbordamiento en PyMuPDF
+            for fs in (10.0, 8.5, 7.0, 6.0, 5.0, 4.0, 3.0):
+                if page.insert_textbox(rect, text, fontsize=fs, render_mode=3) >= 0:
+                    inserted = True
+                    break
+            if not inserted:
+                # Fallback de posicionamiento puntual si la caja es excesivamente angosta
+                point = pymupdf.Point(rect.x0, min(rect.y1, rect.y0 + 8.0))
+                page.insert_text(point, text, fontsize=6.0, render_mode=3)
+        except Exception as exc:
+            logger.debug("Error inyectando texto OCR '%s': %s", text, exc)
+

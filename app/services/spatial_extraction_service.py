@@ -380,7 +380,7 @@ def extract_spatial_key_values(
     for param in canonical_params:
         synonyms = expand_parameter_synonyms(param)
         found_for_param = False
-        is_entity_param = any(k in param for k in ("arrendador", "arrendatario", "representante", "contratante", "contratista", "cliente", "proveedor", "notario", "perito"))
+        is_entity_param = any(k in param for k in ("nombre", "titular", "arrendador", "arrendatario", "representante", "contratante", "contratista", "cliente", "proveedor", "notario", "perito", "solicitante", "otorgante", "compareciente"))
 
         # Si ya se identificó mediante análisis contractual directo, usar el hallazgo directamente
         if param in legal_map:
@@ -527,20 +527,21 @@ def extract_spatial_key_values(
                         if len(cut_match) > 1:
                             val_text = cut_match[0].strip()
 
-                        # Si es persona o entidad, remover prefijos gramaticales conectores
+                        # Si es persona o entidad, remover prefijos gramaticales conectores y cargos
+                        next_line_words = []
                         if is_entity_param:
                             val_text = re.sub(r"^(?:por|de|el|la)\s+", "", val_text, flags=re.IGNORECASE).strip()
+                            val_text = re.sub(r"^(?:titular|encargado|adjunto|publico)\s+", "", val_text, flags=re.IGNORECASE).strip()
                             if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", val_text, re.IGNORECASE):
                                 val_text = ""
 
                             # Soporte para salto de línea si el nombre se cortó al final del margen
                             tokens = val_text.split()
-                            if len(tokens) <= 2 and right_words:
-                                next_line_words = []
+                            if len(tokens) <= 3 and right_words:
                                 k_y_bottom = max(w[3] for w in right_words)
                                 for nw in raw_words:
                                     dy_next = nw[1] - k_y_bottom
-                                    if -2.0 <= dy_next <= 18.0 and nw[0] <= 150.0:
+                                    if -2.0 <= dy_next <= 22.0 and nw[0] <= 180.0:
                                         next_line_words.append(nw)
                                 if next_line_words:
                                     next_line_words.sort(key=lambda item: item[0])
@@ -566,10 +567,13 @@ def extract_spatial_key_values(
                     # Descartar unidades de encabezado de tabla como (COP) o si quedó vacío
                     if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
                         found_right = True
-                        v_x0 = right_words[0][0]
-                        v_y0 = min(w[1] for w in right_words)
-                        v_x1 = right_words[-1][2]
-                        v_y1 = max(w[3] for w in right_words)
+                        all_val_words = list(right_words)
+                        if next_line_words:
+                            all_val_words.extend(next_line_words)
+                        v_x0 = min(w[0] for w in all_val_words)
+                        v_y0 = min(w[1] for w in all_val_words)
+                        v_x1 = max(w[2] for w in all_val_words)
+                        v_y1 = max(w[3] for w in all_val_words)
 
                         evidence_counter += 1
                         ev_id = f"ev_p{page_num}_{evidence_counter:03d}"
@@ -678,6 +682,7 @@ def extract_spatial_key_values(
 
                             if is_entity_param:
                                 val_text = re.sub(r"^(?:por|de|el|la)\s+", "", val_text, flags=re.IGNORECASE).strip()
+                                val_text = re.sub(r"^(?:titular|encargado|adjunto|publico)\s+", "", val_text, flags=re.IGNORECASE).strip()
                                 if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", val_text, re.IGNORECASE):
                                     val_text = ""
 

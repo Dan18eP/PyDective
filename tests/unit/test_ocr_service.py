@@ -72,3 +72,40 @@ def test_extract_page_ocr_handles_empty_or_invalid():
 
     assert full_text == ""
     assert boxes == []
+
+
+def test_inject_ocr_text_layer_and_name_extraction():
+    # Valida inyeccion de capa OCR y extraccion de nombre y notario en doc_051_escaneo.pdf
+    pdf_path = FIXTURES_DIR / "doc_051_escaneo.pdf"
+    if not pdf_path.exists():
+        pytest.skip("Fixture doc_051_escaneo.pdf no encontrado")
+
+    from app.services.ocr_service import inject_ocr_text_layer
+    from app.services.spatial_extraction_service import extract_spatial_key_values
+
+    doc = pymupdf.open(str(pdf_path))
+    page = doc[0]
+    full_text, boxes = extract_page_ocr(page)
+    inject_ocr_text_layer(page, boxes)
+
+    # Validar que tras la inyeccion, las palabras estan disponibles en la pagina
+    words = page.get_text("words")
+    assert len(words) >= 10
+
+    # Comprobar extraccion espacial directa
+    findings = extract_spatial_key_values(page, ["nombre", "notario", "fecha", "valor"])
+    f_map = {f.parametro: f for f in findings}
+
+    assert "nombre" in f_map
+    assert f_map["nombre"].valor == "ROBERTO ANTONIO JARAMILLO OSPINA"
+    assert f_map["nombre"].confianza >= 0.90
+    assert len(f_map["nombre"].evidencias) == 1
+
+    assert "fecha" in f_map
+    assert f_map["fecha"].valor == "2026-01-15"
+
+    assert "valor" in f_map
+    assert "1.250.000" in f_map["valor"].valor
+
+    doc.close()
+

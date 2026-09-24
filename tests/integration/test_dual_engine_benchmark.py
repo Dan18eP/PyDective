@@ -138,3 +138,40 @@ def test_ssr_resultados_renders_benchmark_card_and_bbox_coords():
     assert "Microsoft Florence-2" in html
     assert "Coordenadas BBox" in html
     assert "btn-copy-bbox" in html
+
+
+def test_rapidocr_extracts_name_on_scanned_pdf_fixture_051():
+    # Valida que el motor RapidOCR reconoce el nombre completo en doc_051_escaneo.pdf
+    fixtures_100_dir = Path(__file__).resolve().parent.parent / "fixtures_100"
+    pdf_path = fixtures_100_dir / "doc_051_escaneo.pdf"
+    if not pdf_path.exists():
+        pytest.skip("Fixture doc_051_escaneo.pdf no encontrado")
+
+    with open(pdf_path, "rb") as f:
+        files = {"file": ("doc_051_escaneo.pdf", f, "application/pdf")}
+        data = {"parametros": "nombre, notario, fecha, valor", "motor_vision": "rapidocr"}
+        response = client.post("/procesar", files=files, data=data)
+
+    assert response.status_code == 200
+    res = response.json()
+    assert res["motor_seleccionado"] == "rapidocr"
+
+    h_map = {h["parametro"]: h for h in res["hallazgos"]}
+
+    # Validar deteccion exacta del nombre completo
+    assert "nombre" in h_map
+    assert h_map["nombre"]["valor"] == "ROBERTO ANTONIO JARAMILLO OSPINA"
+    assert h_map["nombre"]["confianza"] == 1.0
+    assert len(h_map["nombre"]["evidencias"]) >= 1
+
+    bbox = h_map["nombre"]["evidencias"][0]["bbox"]
+    assert len(bbox) == 4
+    assert bbox[2] > bbox[0]
+    assert bbox[3] > bbox[1]
+
+    # Validar fecha y valor
+    assert "fecha" in h_map
+    assert h_map["fecha"]["valor"] == "2026-01-15"
+    assert "valor" in h_map
+    assert "1.250.000" in h_map["valor"]["valor"]
+

@@ -62,7 +62,7 @@ from app.services.image_service import (
     classify_image_semantics,
     catalog_page_images,
 )
-from app.services.ocr_service import extract_page_ocr
+from app.services.ocr_service import extract_page_ocr, inject_ocr_text_layer
 from app.services.florence_service import (
     extract_page_florence,
     florence_findings_to_domain,
@@ -241,12 +241,7 @@ def _try_auto_process_file(pdf_hash: str) -> Optional[JobOutput]:
                         ocr_full_text, ocr_boxes = extract_page_ocr(page)
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
-                            for b in ocr_boxes:
-                                try:
-                                    rect = pymupdf.Rect(b["bbox"])
-                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
-                                except Exception:
-                                    pass
+                            inject_ocr_text_layer(page, ocr_boxes)
 
                     page_findings = extract_spatial_key_values(page, canonical_params) if len(page_text.strip()) > 0 else []
                     all_spatial.extend(page_findings)
@@ -550,12 +545,7 @@ async def procesar_documento(
                         total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
-                            for b in ocr_boxes:
-                                try:
-                                    rect = pymupdf.Rect(b["bbox"])
-                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
-                                except Exception:
-                                    pass
+                            inject_ocr_text_layer(page, ocr_boxes)
 
                 if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
@@ -702,8 +692,20 @@ async def procesar_documento(
             comparativa_motores=comparativa_motores,
         )
 
-        # Indexación L1 y persistencia en L0
-        assoc_index = {h.parametro: h.evidencias for h in final_hallazgos if h.evidencias}
+        # Indexacion L1 incremental y persistencia en L0
+        existing_l1 = get_l1_cache(pdf_hash)
+        merged_assoc = {}
+        merged_previos = {}
+        if existing_l1 is not None:
+            merged_assoc.update(existing_l1.indice_asociativo)
+            for h in existing_l1.hallazgos_previos:
+                merged_previos[h.parametro] = h
+
+        for h in final_hallazgos:
+            if h.evidencias:
+                merged_assoc[h.parametro] = h.evidencias
+            merged_previos[h.parametro] = h
+
         l1_entry = L1DocumentEntry(
             pdf_hash=pdf_hash,
             pipeline_version="2.2",
@@ -712,8 +714,8 @@ async def procesar_documento(
             paginas_completadas=total_pages - len(failed_pages),
             paginas_pendientes=failed_pages,
             resultados_por_pagina=resultados_por_pagina,
-            indice_asociativo=assoc_index,
-            hallazgos_previos=final_hallazgos,
+            indice_asociativo=merged_assoc,
+            hallazgos_previos=list(merged_previos.values()),
             telemetria_original=output.telemetria,
         )
         set_l1_cache(pdf_hash, l1_entry)
@@ -834,12 +836,7 @@ async def procesar_documento_stream(
                         total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
-                            for b in ocr_boxes:
-                                try:
-                                    rect = pymupdf.Rect(b["bbox"])
-                                    page.insert_textbox(rect, b["text"], fontsize=10, render_mode=3)
-                                except Exception:
-                                    pass
+                            inject_ocr_text_layer(page, ocr_boxes)
 
                 if len(page_text.strip()) > 0 and motor_vision != "florence2":
                     t_r = time.perf_counter()
@@ -975,8 +972,20 @@ async def procesar_documento_stream(
                 comparativa_motores=comparativa_motores,
             )
 
-            # Indexación L1 y persistencia en L0
-            assoc_index = {h.parametro: h.evidencias for h in final_hallazgos if h.evidencias}
+            # Indexacion L1 incremental y persistencia en L0
+            existing_l1 = get_l1_cache(pdf_hash)
+            merged_assoc = {}
+            merged_previos = {}
+            if existing_l1 is not None:
+                merged_assoc.update(existing_l1.indice_asociativo)
+                for h in existing_l1.hallazgos_previos:
+                    merged_previos[h.parametro] = h
+
+            for h in final_hallazgos:
+                if h.evidencias:
+                    merged_assoc[h.parametro] = h.evidencias
+                merged_previos[h.parametro] = h
+
             l1_entry = L1DocumentEntry(
                 pdf_hash=pdf_hash,
                 pipeline_version="2.2",
@@ -985,8 +994,8 @@ async def procesar_documento_stream(
                 paginas_completadas=total_pages - len(failed_pages),
                 paginas_pendientes=failed_pages,
                 resultados_por_pagina=resultados_por_pagina,
-                indice_asociativo=assoc_index,
-                hallazgos_previos=final_hallazgos,
+                indice_asociativo=merged_assoc,
+                hallazgos_previos=list(merged_previos.values()),
                 telemetria_original=output.telemetria,
             )
             set_l1_cache(pdf_hash, l1_entry)

@@ -1,0 +1,336 @@
+{
+  "escaneo_pdf": {
+    "total_files": 10,
+    "classification_distribution": {
+      "needs_ai": 10
+    },
+    "accuracy": "0/30 (0.0%)",
+    "visual_accuracy": "0/10 (0.0%)",
+    "avg_latency_ms": 10.6,
+    "encoding_issues_count": 10,
+    "encoding_issues": [
+      [
+        "doc_051_escaneo.pdf",
+        "fecha",
+        "2026-01-15"
+      ],
+      [
+        "doc_052_escaneo.pdf",
+        "fecha",
+        "2026-03-20"
+      ],
+      [
+        "doc_053_escaneo.pdf",
+        "fecha",
+        "2026-04-15"
+      ],
+      [
+        "doc_054_escaneo.pdf",
+        "fecha",
+        "2026-05-22"
+      ],
+      [
+        "doc_055_escaneo.pdf",
+        "fecha",
+        "2026-06-30"
+      ],
+      [
+        "doc_056_escaneo.pdf",
+        "fecha",
+        "2026-08-10"
+      ],
+      [
+        "doc_057_escaneo.pdf",
+        "fecha",
+        "2026-09-23"
+      ],
+      [
+        "doc_058_escaneo.pdf",
+        "fecha",
+        "2026-11-05"
+      ],
+      [
+        "doc_059_escaneo.pdf",
+        "fecha",
+        "2026-01-15"
+      ],
+      [
+        "doc_060_escaneo.pdf",
+        "fecha",
+        "2026-03-20"
+      ]
+    ]
+  },
+  "imagen_png": {
+    "total_files": 10,
+    "classification_distribution": {
+      "needs_ai": 10
+    },
+    "accuracy": "0/30 (0.0%)",
+    "visual_accuracy": "0/10 (0.0%)",
+    "avg_latency_ms": 26.83,
+    "encoding_issues_count": 10,
+    "encoding_issues": [
+      [
+        "doc_061_img.png",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_062_img.png",
+        "nit",
+        "900543210-8"
+      ],
+      [
+        "doc_063_img.png",
+        "nit",
+        "830123987-1"
+      ],
+      [
+        "doc_064_img.png",
+        "nit",
+        "890900123-5"
+      ],
+      [
+        "doc_065_img.png",
+        "nit",
+        "900876543-2"
+      ],
+      [
+        "doc_066_img.png",
+        "nit",
+        "901234567-9"
+      ],
+      [
+        "doc_067_img.png",
+        "nit",
+        "860001234-4"
+      ],
+      [
+        "doc_068_img.png",
+        "nit",
+        "800154890-1"
+      ],
+      [
+        "doc_069_img.png",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_070_img.png",
+        "nit",
+        "900543210-8"
+      ]
+    ]
+  },
+  "imagen_jpg": {
+    "total_files": 10,
+    "classification_distribution": {
+      "needs_ai": 10
+    },
+    "accuracy": "0/30 (0.0%)",
+    "visual_accuracy": "0/10 (0.0%)",
+    "avg_latency_ms": 12.18,
+    "encoding_issues_count": 10,
+    "encoding_issues": [
+      [
+        "doc_071_img.jpg",
+        "nit",
+        "830123987-1"
+      ],
+      [
+        "doc_072_img.jpg",
+        "nit",
+        "890900123-5"
+      ],
+      [
+        "doc_073_img.jpg",
+        "nit",
+        "900876543-2"
+      ],
+      [
+        "doc_074_img.jpg",
+        "nit",
+        "901234567-9"
+      ],
+      [
+        "doc_075_img.jpg",
+        "nit",
+        "860001234-4"
+      ],
+      [
+        "doc_076_img.jpg",
+        "nit",
+        "800154890-1"
+      ],
+      [
+        "doc_077_img.jpg",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_078_img.jpg",
+        "nit",
+        "900543210-8"
+      ],
+      [
+        "doc_079_img.jpg",
+        "nit",
+        "830123987-1"
+      ],
+      [
+        "doc_080_img.jpg",
+        "nit",
+        "890900123-5"
+      ]
+    ]
+  },
+  "imagen_tiff": {
+    "total_files": 5,
+    "classification_distribution": {
+      "needs_ai": 5
+    },
+    "accuracy": "0/15 (0.0%)",
+    "visual_accuracy": "0/5 (0.0%)",
+    "avg_latency_ms": 28.08,
+    "encoding_issues_count": 5,
+    "encoding_issues": [
+      [
+        "doc_081_img.tiff",
+        "nit",
+        "900876543-2"
+      ],
+      [
+        "doc_082_img.tiff",
+        "nit",
+        "901234567-9"
+      ],
+      [
+        "doc_083_img.tiff",
+        "nit",
+        "860001234-4"
+      ],
+      [
+        "doc_084_img.tiff",
+        "nit",
+        "800154890-1"
+      ],
+      [
+        "doc_085_img.tiff",
+        "nit",
+        "901884231-3"
+      ]
+    ]
+  },
+  "ofimatico_xlsx": {
+    "total_files": 5,
+    "classification_distribution": {
+      "local": 5
+    },
+    "accuracy": "0/15 (0.0%)",
+    "visual_accuracy": "N/A",
+    "avg_latency_ms": 35.48,
+    "encoding_issues_count": 5,
+    "encoding_issues": [
+      [
+        "doc_091_balance.xlsx",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_092_balance.xlsx",
+        "nit",
+        "900543210-8"
+      ],
+      [
+        "doc_093_balance.xlsx",
+        "nit",
+        "830123987-1"
+      ],
+      [
+        "doc_094_balance.xlsx",
+        "nit",
+        "890900123-5"
+      ],
+      [
+        "doc_095_balance.xlsx",
+        "nit",
+        "900876543-2"
+      ]
+    ]
+  },
+  "ofimatico_docx": {
+    "total_files": 5,
+    "classification_distribution": {
+      "local": 5
+    },
+    "accuracy": "7/20 (35.0%)",
+    "visual_accuracy": "N/A",
+    "avg_latency_ms": 31.75,
+    "encoding_issues_count": 5,
+    "encoding_issues": [
+      [
+        "doc_086_contrato.docx",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_087_contrato.docx",
+        "representante legal",
+        "CARLOS EDUARDO RESTREPO MEJÍA"
+      ],
+      [
+        "doc_088_contrato.docx",
+        "representante legal",
+        "MARÍA CONSUELO GÓMEZ ÁLVAREZ"
+      ],
+      [
+        "doc_089_contrato.docx",
+        "nit",
+        "890900123-5"
+      ],
+      [
+        "doc_090_contrato.docx",
+        "representante legal",
+        "DIANA PATRICIA CÁRDENAS BOTERO"
+      ]
+    ]
+  },
+  "ofimatico_txt": {
+    "total_files": 5,
+    "classification_distribution": {
+      "local": 5
+    },
+    "accuracy": "8/20 (40.0%)",
+    "visual_accuracy": "N/A",
+    "avg_latency_ms": 7.94,
+    "encoding_issues_count": 5,
+    "encoding_issues": [
+      [
+        "doc_096_extracto.txt",
+        "nit",
+        "901884231-3"
+      ],
+      [
+        "doc_097_extracto.txt",
+        "nit",
+        "900543210-8"
+      ],
+      [
+        "doc_098_extracto.txt",
+        "nit",
+        "830123987-1"
+      ],
+      [
+        "doc_099_extracto.txt",
+        "nit",
+        "890900123-5"
+      ],
+      [
+        "doc_100_extracto.txt",
+        "nit",
+        "900876543-2"
+      ]
+    ]
+  }
+}

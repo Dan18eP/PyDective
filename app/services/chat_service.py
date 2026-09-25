@@ -14,7 +14,7 @@ from app.domain.errors import DocumentoNoEncontradoOExpiradoError
 from app.domain.enums import MetodoExtraccion
 from app.services.cache_service import get_l1_cache, set_l1_cache, L1DocumentEntry
 from app.services.markdown_service import get_or_create_page_indexed_markdown
-from app.services.markdown_search_service import deterministic_search, get_relevant_page_slices
+from app.services.markdown_search_service import deterministic_search, get_relevant_page_slices, _strip_accents
 from app.services.semantic_extraction_service import normalize_parameter
 from app.settings import settings
 

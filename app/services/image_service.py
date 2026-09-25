@@ -279,6 +279,9 @@ def detect_morphological_visual_elements(
     page: pymupdf.Page,
     min_sig_area_px: float = 60.0,
     min_seal_area_px: float = 120.0,
+    img_bgr: Optional[Any] = None,
+    scale_x: Optional[float] = None,
+    scale_y: Optional[float] = None,
 ) -> List[MetadatoImagen]:
     """
     Segmentacion morfologica y cromatica de firmas y sellos en imagenes puras y escaneos (VIS-01).
@@ -293,19 +296,20 @@ def detect_morphological_visual_elements(
         import cv2
         import numpy as np
 
-        pix = page.get_pixmap(dpi=120)
-        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
-        if pix.n == 4:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGBA2BGR)
-        elif pix.n == 1:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
-        else:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
+        if img_bgr is None or scale_x is None or scale_y is None:
+            pix = page.get_pixmap(dpi=120)
+            img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+            if pix.n == 4:
+                img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGBA2BGR)
+            elif pix.n == 1:
+                img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
+            else:
+                img_bgr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
+            scale_x = pix.width / page_rect.width
+            scale_y = pix.height / page_rect.height
 
-        hsv = cv2.cvtColor(img_arr, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
         sat = hsv[:, :, 1]
-        scale_x = pix.width / page_rect.width
-        scale_y = pix.height / page_rect.height
 
         # 1. Mascara de tinta azul (firmas manuscritas)
         blue_mask = ((hsv[:, :, 0] >= 90) & (hsv[:, :, 0] <= 135) & (sat > 35)).astype(np.uint8) * 255

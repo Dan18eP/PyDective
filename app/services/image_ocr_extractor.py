@@ -204,7 +204,13 @@ def process_scanned_page_and_inject(
     page_num = page.number + 1
 
     try:
-        morph_items = detect_morphological_visual_elements(page)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        morph_items = detect_morphological_visual_elements(
+            page,
+            img_bgr=img_bgr,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
         visuals.extend(morph_items)
     except Exception as exc:
         logger.debug(f"Error segmentando firmas/sellos en página {page_num}: {exc}")

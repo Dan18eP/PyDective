@@ -796,3 +796,29 @@ input:checked + .slider-round:before {
     background-color: #082f49;
 }
 
+/* Citas inline dentro de burbujas de chat que enfocan el visor */
+.inline-page-citation {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.12rem 0.45rem;
+    margin: 0 0.2rem;
+    background: rgba(6, 182, 212, 0.16);
+    border: 1px solid rgba(6, 182, 212, 0.4);
+    border-radius: 6px;
+    color: #38bdf8;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    vertical-align: middle;
+}
+
+.inline-page-citation:hover {
+    background: rgba(6, 182, 212, 0.35);
+    border-color: #38bdf8;
+    box-shadow: 0 0 8px rgba(6, 182, 212, 0.5);
+    transform: translateY(-1px);
+}
+
+

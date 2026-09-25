@@ -467,6 +467,9 @@ async function sendChatMessage() {
                                     textContainer.textContent = fullRespuesta;
                                     container.scrollTop = container.scrollHeight;
                                 }
+                                if (payload.evidencias && payload.evidencias.length > 0) {
+                                    finalEvidencias = payload.evidencias;
+                                }
                                 if (payload.citas && payload.citas.length > 0) {
                                     finalCitas = payload.citas;
                                 }
@@ -531,7 +534,7 @@ async function sendChatMessage() {
                 finalCitas.map(c => {
                     const match = c.match(/\d+/);
                     const pageNum = match ? parseInt(match[0], 10) : 1;
-                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="if(window.activePdfViewer) window.activePdfViewer.goToPage(${pageNum})" title="Ir a Pág ${pageNum}">
+                    return `<button type="button" class="citation-pill citation-pill-interactive" onclick="window.highlightSourceInPdf(${pageNum}, null, '${c}')" title="Localizar en visor: Pág ${pageNum}">
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <span>${c}</span>
                     </button>`;
@@ -539,12 +542,16 @@ async function sendChatMessage() {
                 `</div>`;
         }
 
-        // Formatear saltos de línea para legibilidad
+        // Formatear citas inline [Página X] como botones interactivos y saltos de línea
         const formattedRespuesta = fullRespuesta
+            .replace(/\[P[áa]gina\s*(\d+)\]/gi, (match, pNum) => {
+                return `<button type="button" class="inline-page-citation" onclick="window.highlightSourceInPdf(${pNum}, null, 'Página ${pNum}')" title="Localizar en visor: Página ${pNum}">[Pág ${pNum}]</button>`;
+            })
             .replace(/\n\n/g, "</p><p>")
             .replace(/\n/g, "<br>");
 
         assistantBubble.innerHTML = `<div class="chat-markdown-body"><p>${formattedRespuesta}</p></div>${citasHtml}`;
+        container.scrollTop = container.scrollHeight;
         container.scrollTop = container.scrollHeight;
     } catch (err) {
         assistantBubble.innerHTML = `<p style="color: var(--danger);">[Error] ${err.message}</p>`;

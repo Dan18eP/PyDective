@@ -606,6 +606,12 @@ def process_chat_query_stream(
         return
 
     # Si es una consulta hacia el SLM local, transmitir streaming token por token
+    from app.services.markdown_search_service import deterministic_search
+    det_summary = deterministic_search(pdf_hash, pregunta)
+    det_hint = ""
+    if det_summary and det_summary.respuesta:
+        det_hint = f"--- DATOS ESTRUCTURADOS DEL EXPEDIENTE ---\n{det_summary.respuesta}\n--- FIN DATOS ESTRUCTURADOS ---\n\n"
+
     target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
     if not target_context:
         target_context = get_or_create_page_indexed_markdown(pdf_hash)
@@ -618,18 +624,21 @@ def process_chat_query_stream(
 
     sys_instruction = (
         "Eres el asistente pericial de PyDective. "
-        "Responde ÚNICAMENTE y de forma DIRECTA, BREVE y CONCISA a lo que se te pregunta sobre el documento. "
-        "NO te extiendas con introducciones ni explicaciones no solicitadas. Ve directo al grano. "
-        "Cita siempre la página correspondiente en formato '[Página X]'. "
-        "Si la respuesta es un dato puntual (nombres, entidades, valores, medicamentos), entrégalo directamente en 1 o 2 líneas."
+        "Responde de forma DIRECTA, BREVE y CONCISA a lo que se te pregunta sobre el documento.\n"
+        "REGLAS:\n"
+        "1. Si te preguntan por el nombre de una persona (paciente, usuario, cliente, médico, titular), responde con su NOMBRE COMPLETO, nunca con números de identificación o cédula.\n"
+        "2. Si en el documento figura 'Nombre completo usuario:' o 'Nombre:', ese es el paciente / usuario.\n"
+        "3. Si la respuesta es un dato puntual (nombres, entidades, valores, medicamentos), entrégalo directamente en 1 o 2 líneas.\n"
+        "4. Cita siempre la página de donde se obtuvo la información en formato '[Página X]'.\n"
+        "5. Ve directo al grano sin introducciones innecesarias ni explicaciones periféricas."
     )
     prompt = (
-        "--- CONTEXTO DEL DOCUMENTO ---\n"
+        f"{det_hint}"
+        "--- EXTRACTO DEL DOCUMENTO ---\n"
         f"{target_context}\n"
-        "--- FIN DEL CONTEXTO ---\n\n"
-        "PREGUNTA DEL USUARIO:\n"
-        f"{pregunta}\n\n"
-        "RESPUESTA DIRECTA Y CONCISA:"
+        "--- FIN DEL EXTRACTO ---\n\n"
+        f"Pregunta del usuario: {pregunta}\n\n"
+        "Respuesta directa y concisa:"
     )
 
     full_text_acc = ""
@@ -638,10 +647,21 @@ def process_chat_query_stream(
         yield f"data: {json.dumps({'token': token, 'citas': [], 'final': False})}\n\n"
 
     # Extraer citas de páginas del texto completo emitido
-    cited_pages = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", full_text_acc, re.IGNORECASE)]
+    cited_pages = [int(m) for m in re.findall(r"\[P[áa]gina\s+(\d+)\]", full_text_acc, re.IGNORECASE)]
     cited_pages = sorted(list(set(cited_pages)))
     citas = [f"[Página {p}]" for p in cited_pages]
+    if not citas and det_summary and det_summary.citas:
+        citas = det_summary.citas
+    if not citas:
+        ctx_pages = [int(m) for m in re.findall(r"<!--\s*INICIO_PAGINA_(\d+)\s*-->", target_context)]
+        if ctx_pages:
+            citas = [f"[Página {min(ctx_pages)}]"]
 
-    yield f"data: {json.dumps({'token': '', 'citas': citas, 'final': True})}\n\n"
+    evidencias_payload = []
+    if det_summary and det_summary.evidencias_relacionadas:
+        for ev in det_summary.evidencias_relacionadas[:3]:
+            evidencias_payload.append(ev.model_dump())
+
+    yield f"data: {json.dumps({'token': '', 'citas': citas, 'evidencias': evidencias_payload, 'final': True})}\n\n"
 
 

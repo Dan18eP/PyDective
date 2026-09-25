@@ -520,8 +520,20 @@ class PydectivePdfViewer {
     }
 }
 
-// Inicialización global accesible para templates y chat
+// Alias y funciones globales accesibles para templates y chat
+PydectivePdfViewer.prototype.highlightGrounding = function(pageNum, bbox, label, valueSnippet) {
+    return this.highlightSource(pageNum, bbox, label, valueSnippet);
+};
+
 window.PydectivePdfViewer = PydectivePdfViewer;
+
+window.highlightSourceInPdf = function(pageNum, bbox, label, valueSnippet) {
+    if (window.activePdfViewer) {
+        window.activePdfViewer.highlightSource(pageNum, bbox, label, valueSnippet);
+    } else {
+        console.warn("[PyDective] Visor no inicializado aún.");
+    }
+};
 
 /**
  * Inicializador del divisor interactivo (Split Resizer)

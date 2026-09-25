@@ -5,7 +5,7 @@
 {% block extra_head %}
 <!-- PDF.js library for high-fidelity client-side rendering -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<link rel="stylesheet" href="/static/css/pdf_viewer.css">
+<link rel="stylesheet" href="/static/css/pdf_viewer.css?v=2.2.3">
 {% endblock %}
 
 {% block content %}
@@ -448,7 +448,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/pdf_viewer.js"></script>
+<script src="/static/js/pdf_viewer.js?v=2.2.3"></script>
 <script>
     function copyToClipboard(text, btn) {
         if (navigator.clipboard && window.isSecureContext) {

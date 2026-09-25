@@ -865,11 +865,11 @@ async def procesar_documento_stream(
                     if len(doc[idx].get_text().strip()) == 0
                 ]
                 if len(scanned_indices) > 1:
-                    yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'rapidocr', 'numero_pagina': 1, 'estado': f'Procesando {len(scanned_indices)} folios escaneados en paralelo...'})}\n\n"
+                    yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'rapidocr', 'numero_pagina': 1, 'estado': f'Procesando {len(scanned_indices)} folios escaneados en paralelo con RapidOCR...'})}\n\n"
                     await asyncio.sleep(0.01)
 
                     loop = asyncio.get_running_loop()
-                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
                     def _task_ocr(idx):
                         t0_sub = time.perf_counter()
@@ -884,7 +884,6 @@ async def procesar_documento_stream(
                     for f in asyncio.as_completed(tasks):
                         idx, txt, bxs, vis, ms = await f
                         ocr_cache[idx] = (txt, bxs, vis, ms)
-                        yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'rapidocr', 'numero_pagina': idx + 1, 'estado': 'completado', 'duracion_ms': round(ms, 1)})}\n\n"
                     executor.shutdown(wait=False)
 
             for p_idx in range(total_pages):

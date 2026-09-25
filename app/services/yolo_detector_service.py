@@ -112,8 +112,24 @@ def classify_document_layout_element(
         if is_qr:
             return "codigo_qr"
 
+    # 2.5 Detección de Gráficos y Diagramas Financieros / Técnicos (Prioridad sobre Fotografía)
+    is_barcode_mention = any(kw in norm_text for kw in ("codigo de barras", "código de barras", "codigo barras", "código barras", "barcode"))
+    has_chart_keywords = (not is_barcode_mention) and any(
+        kw in norm_text for kw in (
+            "grafico de barras", "gráfica de barras", "grafica de barras", "diagrama de barras",
+            "grafico", "gráfica", "grafica", "comportamiento", "financiero",
+            "presupuesto", "trimestral", "real vs", "comparativo", "balance",
+            "distribucion", "distribución", "estadistica", "estadística", "tasa",
+            "indicador", "diagrama", "flujo", "ejecucion", "ejecución", "rendimiento",
+            "proyeccion", "proyección", "variacion", "variación", "historico", "histórico",
+            "cifras", "millones", "porcentaje", "pastel", "histograma"
+        )
+    )
+    if has_chart_keywords and not is_vector:
+        return "diagrama"
+
     # 3. Detección de Fotografía Pericial / Técnica
-    # Si el texto describe una fotografía o inspección
+    # Si el texto describe explícitamente una fotografía o inspección
     has_photo_caption = any(
         kw in norm_text for kw in (
             "anexo fotografico", "anexo fotográfico", "fotografia", "fotografía",
@@ -128,10 +144,11 @@ def classify_document_layout_element(
     if crop_bgr is not None and not is_vector and (w >= 100 and h >= 80):
         entropy = compute_image_entropy(crop_bgr)
         # Fotografías naturales suelen tener entropía > 5.4 y 3 canales cromáticos con variación
-        if entropy > 5.4:
+        # Salvaguarda: solo si NO contiene indicios de diagramas o cifras
+        if entropy > 5.5 and not has_chart_keywords:
             b, g, r = cv2.split(crop_bgr)
             color_variance = float(np.mean(np.abs(r.astype(float) - b.astype(float))))
-            if color_variance > 12.0 or (w >= 200 and h >= 150):
+            if color_variance > 14.0 or (w >= 220 and h >= 160 and entropy > 5.8):
                 return "fotografia"
 
     # 4. Sello Oficial Notarial / Institucional

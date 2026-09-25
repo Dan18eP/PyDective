@@ -291,6 +291,24 @@ def _search_visual_query(
                     )
 
     if not matching_pages:
+        if is_qr_query:
+            return ChatOutput(
+                respuesta="No se identificaron códigos QR en el documento analizado.",
+                citas=[],
+                evidencias_relacionadas=[],
+            )
+        if is_barcode_query:
+            return ChatOutput(
+                respuesta="No se identificaron códigos de barras en el documento analizado.",
+                citas=[],
+                evidencias_relacionadas=[],
+            )
+        if is_seal_query:
+            return ChatOutput(
+                respuesta="No se identificaron sellos oficiales en el documento analizado.",
+                citas=[],
+                evidencias_relacionadas=[],
+            )
         return None
 
     matching_pages.sort()
@@ -303,6 +321,15 @@ def _search_visual_query(
     if target_match:
         target_page = int(target_match.group(1))
 
+    # 1b. Si la consulta asocia una imagen a un capítulo (ej: "explica la imagen del capitulo 5")
+    cap_match = re.search(r"\bcap[ií]tulo\s*(\d+|[ivxlcdm]+)\b", pregunta_norm)
+    if cap_match and target_page is None:
+        c_val = cap_match.group(1).lower()
+        for p_idx, p_text in pages_dict.items():
+            if re.search(rf"\bcap[ií]tulo\s+{re.escape(c_val)}\b", _strip_accents(p_text)):
+                target_page = p_idx
+                break
+
     # 2. Detectar si el usuario especificó un ítem visual concreto (ej: "imagen 1", "foto 2", "figura 1", "diagrama 3", "sello 1")
     target_item_num = None
     item_match = re.search(r"\b(?:imagen|foto|fotografia|figura|diagrama|sello|firma)\s*(\d+)\b", pregunta_norm)
@@ -311,6 +338,17 @@ def _search_visual_query(
 
     if target_page is not None:
         p_items = [d.replace(f"[Página {target_page}]: ", "") for d in item_descriptions if f"[Página {target_page}]" in d]
+        # Si no hubo coincidencia con el filtro específico (ej: preguntó por 'gráfica' y en la pág hay un elemento visual indexado)
+        if not p_items and resultados_paginas:
+            for res in resultados_paginas:
+                if getattr(res, "numero_pagina", None) == target_page:
+                    for v in getattr(res, "metadatos_visuales", []):
+                        desc = v.descripcion_visual or (v.clasificacion_semantica or "").replace("_", " ")
+                        if v.contenido_decodificado:
+                            desc += f" ({v.contenido_decodificado})"
+                        if desc not in p_items:
+                            p_items.append(desc)
+
         p_evs = [e for e in evidences if e.page == target_page]
         cita = f"[Página {target_page}]"
 
@@ -397,6 +435,13 @@ def get_relevant_page_slices(pdf_hash: str, pregunta: str, max_pages: int = 2) -
 
     q_clean = _strip_accents(pregunta)
 
+    # 0. Prioridad quirúrgica: Si la consulta especifica una página concreta (ej: "pagina 4", "folio 5")
+    explicit_p_match = re.search(r"\b(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*(\d+)\b", q_clean)
+    if explicit_p_match:
+        target_p = int(explicit_p_match.group(1))
+        if target_p in pages_dict:
+            return f"<!-- INICIO_PAGINA_{target_p} -->\n{pages_dict[target_p]}\n<!-- FIN_PAGINA_{target_p} -->"
+
     # Si es una consulta de resumen global, seleccionar las páginas ancla (Carátula, Alcance y Cierre/Firmas)
     is_global_summary = any(
         k in q_clean for k in (
@@ -475,6 +520,194 @@ def get_relevant_page_slices(pdf_hash: str, pregunta: str, max_pages: int = 2) -
     return "\n\n".join(slices)
 
 
+def _extract_page_content_query(
+    pregunta_norm: str,
+    pages_dict: Dict[int, str],
+    total_pages: int,
+    resultados_paginas: Optional[List[Any]] = None,
+) -> Optional[ChatOutput]:
+    """
+    Extractor Determinista de Página (<3ms, 0 tokens).
+    Responde consultas orientadas al contenido general de una página ('que hay en la pagina 4', 'que dice la pag 2', 'pagina 5').
+    Maneja con total transparencia páginas en blanco o reversos de escaneo.
+    """
+    page_match = re.search(r"\b(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*(\d+)\b", pregunta_norm)
+    if not page_match:
+        return None
+
+    # Verificar si es una consulta sobre la página en sí (y no sobre un elemento visual puntual)
+    is_visual_query = any(k in pregunta_norm for k in ("imagen", "imagenes", "grafico", "diagrama", "foto", "firma", "sello", "qr", "barras"))
+    if is_visual_query:
+        return None
+
+    is_page_lookup = any(
+        k in pregunta_norm for k in (
+            "que hay", "que contiene", "que dice", "contenido", "informacion",
+            "resumen", "detalla", "muestra", "ver", "revisar", "texto"
+        )
+    ) or re.match(r"^(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*\d+$", pregunta_norm.strip())
+
+    if not is_page_lookup:
+        return None
+
+    p_num = int(page_match.group(1))
+    cita = f"[Página {p_num}]"
+
+    if p_num not in pages_dict:
+        return ChatOutput(
+            respuesta=f"El documento analizado contiene {total_pages} páginas. La {cita} no existe en el expediente.",
+            citas=[],
+            evidencias_relacionadas=[],
+        )
+
+    p_content = pages_dict[p_num].strip()
+
+    # Limpiar líneas de separación y encabezados de página repetitivos
+    clean_lines = []
+    for line in p_content.splitlines():
+        l_str = line.strip()
+        if not l_str or l_str.startswith("<!--"):
+            continue
+        if re.match(r"^#+\s*P[áa]gina\s*\d+", l_str, re.IGNORECASE):
+            continue
+        clean_lines.append(l_str)
+
+    # Identificar si hay elementos visuales en esta página
+    visual_items = []
+    if resultados_paginas:
+        for res in resultados_paginas:
+            if getattr(res, "numero_pagina", None) == p_num:
+                for v in getattr(res, "metadatos_visuales", []):
+                    desc = v.descripcion_visual or (v.clasificacion_semantica or "").replace("_", " ")
+                    if v.contenido_decodificado:
+                        desc += f" ({v.contenido_decodificado})"
+                    if desc not in visual_items:
+                        visual_items.append(desc)
+
+    text_body = " ".join(clean_lines).strip()
+    text_body = re.sub(r"[*#_`]", "", text_body).strip()
+
+    if not text_body and not visual_items:
+        return ChatOutput(
+            respuesta=f"En la {cita} no se detectó contenido textual legible ni elementos visuales registrados (página en blanco o reverso de escaneo).",
+            citas=[cita],
+            evidencias_relacionadas=[],
+        )
+
+    parts = []
+    if text_body:
+        snippet = text_body[:420] + ("..." if len(text_body) > 420 else "")
+        parts.append(f"En la {cita} se registra el siguiente contenido:\n\"{snippet}\"")
+    if visual_items:
+        v_list = "\n".join([f"- {item}" for item in visual_items[:4]])
+        parts.append(f"Elementos visuales identificados en la {cita}:\n{v_list}")
+
+    respuesta = "\n\n".join(parts)
+    ev = Evidence(
+        evidence_id=f"ev_p{p_num}_lookup",
+        page=p_num,
+        text=text_body[:180] if text_body else f"Contenido e inspección de {cita}",
+        bbox=[50.0, 50.0, 500.0, 600.0],
+        source=MetodoExtraccion.NATIVE_TEXT if text_body else MetodoExtraccion.VISUAL_AI,
+        evidence_score=0.98,
+    )
+    return ChatOutput(
+        respuesta=respuesta,
+        citas=[cita],
+        evidencias_relacionadas=[ev],
+    )
+
+
+def _match_exact_structural_section(
+    pregunta_norm: str,
+    pages_dict: Dict[int, str],
+) -> Optional[ChatOutput]:
+    """
+    Matcher exacto de capítulos, cláusulas, artículos y módulos.
+    Preserva dígitos cardinales y romanos (1, 2, 3, I, II, III).
+    Garantiza que 'capitulo 1' devuelva el Capítulo 1 y no el Capítulo 2.
+    Si se busca un capítulo que no existe, responde que no existe.
+    """
+    pattern = re.compile(
+        r"\b(cap[ií]tulo|cl[aá]usula|art[ií]culo|secci[oó]n|m[oó]dulo)\s*([0-9]+|[ivxlcdm]+|primer[oa]?|segund[oa]?|tercer[oa]?|cuart[oa]?|quint[oa]?|sext[oa]?|s[eé]ptim[oa]?|octav[oa]?|noven[oa]?|d[eé]cim[oa]?)\b",
+        re.IGNORECASE
+    )
+    match = pattern.search(pregunta_norm)
+    if not match:
+        return None
+
+    sec_type = match.group(1).lower()
+    sec_num_raw = match.group(2).lower()
+
+    NUM_MAP = {
+        "1": ["1", "i", "primero", "primera"],
+        "2": ["2", "ii", "segundo", "segunda"],
+        "3": ["3", "iii", "tercero", "tercera"],
+        "4": ["4", "iv", "cuarto", "cuarta"],
+        "5": ["5", "v", "quinto", "quinta"],
+        "6": ["6", "vi", "sexto", "sexta"],
+        "7": ["7", "vii", "septimo", "septima", "séptimo", "séptima"],
+        "8": ["8", "viii", "octavo", "octava"],
+        "9": ["9", "ix", "noveno", "novena"],
+        "10": ["10", "x", "decimo", "decima", "décimo", "décima"],
+    }
+    canonical = None
+    for k, aliases in NUM_MAP.items():
+        if sec_num_raw in aliases or sec_num_raw == k:
+            canonical = k
+            break
+    if not canonical:
+        canonical = sec_num_raw
+
+    target_aliases = NUM_MAP.get(canonical, [canonical])
+    regex_targets = "|".join([re.escape(a) for a in target_aliases])
+    target_regex = re.compile(rf"(?i)\b{re.escape(sec_type)}\s+(?:{regex_targets})\b")
+
+    found_page = None
+    found_block = None
+
+    for p_num, content in pages_dict.items():
+        lines = content.splitlines()
+        for idx, line in enumerate(lines):
+            line_str = line.strip()
+            if not line_str or line_str.startswith("<!--"):
+                continue
+            if _is_structural_toc_line(line_str):
+                continue
+
+            line_clean = _strip_accents(line_str)
+            if target_regex.search(line_clean):
+                found_page = p_num
+                found_block = _extract_substantive_section_block(lines, idx)
+                break
+        if found_page is not None:
+            break
+
+    if found_page is not None and found_block:
+        cita = f"[Página {found_page}]"
+        return ChatOutput(
+            respuesta=f"En {cita} se detalla lo siguiente: \"{found_block}\".",
+            citas=[cita],
+            evidencias_relacionadas=[
+                Evidence(
+                    evidence_id=f"ev_sec_p{found_page}",
+                    page=found_page,
+                    text=found_block[:180],
+                    bbox=[50.0, 100.0, 520.0, 250.0],
+                    source=MetodoExtraccion.NATIVE_TEXT,
+                    evidence_score=0.99,
+                )
+            ],
+        )
+
+    label_num = canonical.upper() if canonical.isalpha() else canonical
+    return ChatOutput(
+        respuesta=f"No se identificó el {sec_type} {label_num} en el documento analizado.",
+        citas=[],
+        evidencias_relacionadas=[],
+    )
+
+
 def deterministic_search(
     pdf_hash: str,
     pregunta: str,
@@ -482,10 +715,12 @@ def deterministic_search(
 ) -> Optional[ChatOutput]:
     """
     Motor determinista document-agnostic ultrarrápido (<5ms) en RAM sobre Markdown.
-    1. Resuelve consultas visuales ricas en 0 tokens.
-    2. Descarta líneas de índices/TOC basados en estructura de layout.
-    3. Extrae bloques sustantivos multilínea para conceptos específicos (cronogramas, cláusulas, valores).
-    4. Delega preguntas abiertas complejas o de opinión a la ventana quirúrgica del LLM.
+    1. Resuelve consultas directas de páginas ('que hay en la pagina X') en 0 tokens.
+    2. Resuelve capítulos exactos ('capitulo 1', 'capitulo 2', 'capitulo 3') sin cruce.
+    3. Resuelve consultas visuales ricas en 0 tokens.
+    4. Descarta líneas de índices/TOC basados en estructura de layout.
+    5. Extrae bloques sustantivos multilínea para conceptos específicos.
+    6. Delega preguntas abiertas complejas o de opinión a la ventana quirúrgica del LLM.
     """
     markdown_doc = get_or_create_page_indexed_markdown(pdf_hash)
     if not markdown_doc:
@@ -497,7 +732,17 @@ def deterministic_search(
 
     q_clean = _strip_accents(pregunta)
 
-    # 1. Verificar si es una consulta sobre elementos visuales (diagramas, fotos, barras, qr, firmas, sellos)
+    # 1. Extractor determinista de página puntual (ej: "que hay en la pagina 4", "pagina 5")
+    page_out = _extract_page_content_query(q_clean, pages_dict, len(pages_dict), resultados_paginas)
+    if page_out is not None:
+        return page_out
+
+    # 2. Matcher exacto de capítulos, cláusulas o módulos (ej: "capitulo 1", "capitulo 2", "capitulo 3")
+    sec_out = _match_exact_structural_section(q_clean, pages_dict)
+    if sec_out is not None:
+        return sec_out
+
+    # 3. Verificar si es una consulta sobre elementos visuales (diagramas, fotos, barras, qr, firmas, sellos)
     vis_output = _search_visual_query(q_clean, pages_dict, resultados_paginas)
     if vis_output is not None:
         return vis_output

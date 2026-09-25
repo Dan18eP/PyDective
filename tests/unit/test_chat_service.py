@@ -6,6 +6,7 @@ from app.domain.models import (
     ChatMessage,
     JobOutput,
     TelemetriaDesagregada,
+    MetadatoImagen,
 )
 from app.domain.enums import TipoPagina, MetodoExtraccion, EstadoCobertura, NivelCache
 from app.domain.errors import DocumentoNoEncontradoOExpiradoError
@@ -316,5 +317,74 @@ def test_chat_global_summary_with_mocked_llm(monkeypatch):
 
     assert "[Página 1]" in output.citas
     assert "Contrato de Prestación de Servicios" in output.respuesta
+
+
+def test_chat_negative_qr_response_instant():
+    """Verifica que preguntar 'hay qr' cuando no existen QR responda de inmediato en 0 tokens sin caer a LLM."""
+    test_hash = "chat_test_negative_qr_001"
+    l1_entry = L1DocumentEntry(
+        pdf_hash=test_hash,
+        pipeline_version="2.2",
+        status=EstadoCobertura.COMPLETE,
+        paginas_totales=2,
+        paginas_completadas=2,
+        paginas_pendientes=[],
+        resultados_por_pagina=[],
+        documento_markdown_indexado="<!-- INICIO_PAGINA_1 -->\nContrato sin codigos.\n<!-- FIN_PAGINA_1 -->",
+    )
+    set_l1_cache(test_hash, l1_entry)
+
+    output = process_chat_query(
+        pdf_hash=test_hash,
+        pregunta="¿Hay código QR?",
+    )
+
+    assert "no se identificaron códigos qr" in output.respuesta.lower()
+    assert output.citas == []
+
+
+def test_chat_who_signs_returns_signatories():
+    """Verifica que 'quien firma' extraiga los nombres de los firmantes y no una lista vacía de páginas."""
+    test_hash = "chat_test_who_signs_001"
+    v_sign = MetadatoImagen(
+        id_imagen="sig_01",
+        pagina=3,
+        tipo_fisico="vector",
+        bbox=[100.0, 500.0, 300.0, 560.0],
+        area_ratio=0.03,
+        clasificacion_semantica="firma_manuscrita",
+        descripcion_visual="Firma autógrafa de: Dr. Mauricio Cárdenas Rocha - Viceministro",
+    )
+    res_p3 = ResultadoPagina(
+        numero_pagina=3,
+        tipo=TipoPagina.LOCAL,
+        duracion_ms=10.0,
+        metadatos_visuales=[v_sign],
+        evidencias=[],
+    )
+    l1_entry = L1DocumentEntry(
+        pdf_hash=test_hash,
+        pipeline_version="2.2",
+        status=EstadoCobertura.COMPLETE,
+        paginas_totales=3,
+        paginas_completadas=3,
+        paginas_pendientes=[],
+        resultados_por_pagina=[res_p3],
+        documento_markdown_indexado=(
+            "<!-- INICIO_PAGINA_3 -->\n"
+            "Por el Contratante: Dr. Mauricio Cárdenas Rocha, Viceministro.\n"
+            "[Elemento Visual: Firma autógrafa de: Dr. Mauricio Cárdenas Rocha - Viceministro | Coordenadas: [100.0, 500.0, 300.0, 560.0]]\n"
+            "<!-- FIN_PAGINA_3 -->"
+        ),
+    )
+    set_l1_cache(test_hash, l1_entry)
+
+    output = process_chat_query(
+        pdf_hash=test_hash,
+        pregunta="¿Quién firma?",
+    )
+
+    assert "[Página 3]" in output.citas
+    assert "mauricio cárdenas" in output.respuesta.lower() or "mauricio cardenas" in output.respuesta.lower()
 
 

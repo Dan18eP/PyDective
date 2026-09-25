@@ -92,3 +92,39 @@ def test_targeted_page_slicing_token_reduction(sample_multi_page_document):
     assert "<!-- INICIO_PAGINA_4 -->" in slice_text
     assert "<!-- INICIO_PAGINA_1 -->" not in slice_text  # Debe descartar la página de la TOC
     assert len(slice_text) < 1500  # Máximo ~300 tokens vs documento entero
+
+
+def test_exact_chapter_and_clause_matching(sample_multi_page_document):
+    """Verifica que 'modulo 1' y 'modulo 2' devuelvan sus respectivos módulos y no se crucen."""
+    out_m1 = deterministic_search(sample_multi_page_document, "modulo 1")
+    assert out_m1 is not None
+    assert "[Página 2]" in out_m1.citas
+    assert "alcance y partes" in out_m1.respuesta.lower()
+
+    out_m2 = deterministic_search(sample_multi_page_document, "modulo 2")
+    assert out_m2 is not None
+    assert "[Página 4]" in out_m2.citas
+    assert "cronograma e hitos de avance" in out_m2.respuesta.lower()
+
+    out_m5 = deterministic_search(sample_multi_page_document, "modulo 5")
+    assert out_m5 is not None
+    assert "no se identificó el modulo 5" in out_m5.respuesta.lower() or "no se identifico el modulo 5" in out_m5.respuesta.lower()
+
+
+def test_page_content_lookup_and_blank_page(sample_multi_page_document):
+    """Verifica que 'que hay en la pagina 2' extraiga el contenido y 'pagina 99' maneje el caso no existente."""
+    out_p2 = deterministic_search(sample_multi_page_document, "que hay en la pagina 2")
+    assert out_p2 is not None
+    assert "[Página 2]" in out_p2.citas
+    assert "alcance y partes" in out_p2.respuesta.lower() or "ingeniería y construcciones" in out_p2.respuesta.lower()
+
+    out_p99 = deterministic_search(sample_multi_page_document, "que hay en la pagina 99")
+    assert out_p99 is not None
+    assert "no existe" in out_p99.respuesta.lower()
+
+
+def test_negative_visual_queries(sample_multi_page_document):
+    """Verifica que consultas por elementos inexistentes como sellos respondan de inmediato."""
+    out_seal = deterministic_search(sample_multi_page_document, "hay sellos oficiales?")
+    assert out_seal is not None
+    assert "no se identificaron sellos oficiales" in out_seal.respuesta.lower()

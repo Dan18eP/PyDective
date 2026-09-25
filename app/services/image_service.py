@@ -223,13 +223,33 @@ def catalog_page_images(
             page_height=page_rect.height,
         )
 
-        if caption:
+        signatory_name = None
+        if img.clasificacion_semantica == "firma_manuscrita":
+            sign_clip = pymupdf.Rect(
+                max(0.0, img.bbox[0] - 20.0),
+                img.bbox[3],
+                min(page_rect.width, img.bbox[2] + 40.0),
+                min(page_rect.height, img.bbox[3] + 45.0),
+            )
+            raw_sign_text = page.get_text("text", clip=sign_clip).strip()
+            lines = [l.strip() for l in raw_sign_text.splitlines() if l.strip() and not l.strip().startswith("<!--")]
+            if lines:
+                signatory_name = " - ".join(lines[:2])
+
+        if signatory_name:
+            img.descripcion_visual = f"Firma autógrafa de: {signatory_name}"
+        elif caption:
             img.descripcion_visual = caption
         elif nearby_text:
             first_sentence = nearby_text.split(".")[0].strip()
-            img.descripcion_visual = f"{img.clasificacion_semantica}: {first_sentence[:120]}"
+            if img.clasificacion_semantica == "diagrama":
+                img.descripcion_visual = f"Gráfico / Diagrama: {first_sentence[:130]}"
+            elif img.clasificacion_semantica == "fotografia":
+                img.descripcion_visual = f"Fotografía / Evidencia: {first_sentence[:120]}"
+            else:
+                img.descripcion_visual = f"{img.clasificacion_semantica}: {first_sentence[:120]}"
         else:
-            img.descripcion_visual = img.clasificacion_semantica
+            img.descripcion_visual = img.clasificacion_semantica.replace("_", " ")
 
     # Filtrar fondos de escaneo completos que no sean diagramas reales ni códigos verificados
     images = [

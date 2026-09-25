@@ -128,6 +128,13 @@ def _search_visual_elements(resultados_por_pagina: List[Any], query_norm: str) -
             descripcion = f"Sí, el documento cuenta con imágenes y elementos visuales registrados en {citas_str}{extra_note}."
         else:
             descripcion = f"Sí, el documento cuenta con {item_type} verificado e inventariado en {citas_str}{extra_note}."
+    else:
+        if is_qr:
+            descripcion = "No se identificaron códigos QR en el documento analizado."
+        elif is_barcode:
+            descripcion = "No se identificaron códigos de barras en el documento analizado."
+        elif is_seal:
+            descripcion = "No se identificaron sellos oficiales en el documento analizado."
 
     return citas, evidencias, descripcion
 
@@ -177,18 +184,20 @@ def process_chat_query(
         total_pages = fallback_job.paginas_totales or len(resultados_paginas) or 1
 
     # 2. Inspeccionar elementos visuales (preguntas de presencia: códigos de barras, QR, firmas, sellos, fotos, diagramas)
-    is_content_query = any(
+    has_target_page = bool(re.search(r"\b(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*(\d+)\b", q_norm))
+    is_content_query = has_target_page or any(
         kw in q_norm for kw in (
             "de que trata", "de qué trata", "que trata", "qué trata",
             "que contiene", "qué contiene", "que muestra", "qué muestra",
             "que dice", "qué dice", "explica", "explicar", "describ",
-            "cual es el", "cuál es el", "que representa", "qué representa", "contenido",
-            "que significa", "que significan", "qué significa", "qué significan", "significado", "informacion", "detalle"
+            "cual es", "cuál es", "que representa", "qué representa", "contenido",
+            "que significa", "que significan", "qué significa", "qué significan", "significado", "informacion", "detalle",
+            "quien", "quién", "quienes", "quiénes", "identificar", "identifica", "como se llama", "cómo se llama"
         )
     )
     if not is_content_query:
         vis_citas, vis_evidencias, vis_desc = _search_visual_elements(resultados_paginas, q_norm)
-        if vis_citas:
+        if vis_desc:
             return ChatOutput(
                 respuesta=vis_desc,
                 citas=vis_citas,
@@ -256,6 +265,25 @@ def process_chat_query(
                 for ev in h.evidencias:
                     if ev not in matched_evidences:
                         matched_evidences.append(ev)
+
+        # Extraer firmantes identificados en metadatos visuales de firmas manuscritas
+        for res in resultados_paginas:
+            p_num = getattr(res, "numero_pagina", 1)
+            for v in getattr(res, "metadatos_visuales", []):
+                if v.clasificacion_semantica == "firma_manuscrita" and v.descripcion_visual and "Firma autógrafa de:" in v.descripcion_visual:
+                    f_desc = v.descripcion_visual.replace("Firma autógrafa de: ", "FIRMANTE: ")
+                    if f_desc not in matched_findings:
+                        matched_findings.append(f_desc)
+                        matched_evidences.append(
+                            Evidence(
+                                evidence_id=f"ev_sign_p{p_num}_{v.id_imagen}",
+                                page=p_num,
+                                text=v.descripcion_visual,
+                                bbox=v.bbox,
+                                source=MetodoExtraccion.VISUAL_AI,
+                                evidence_score=0.98,
+                            )
+                        )
 
         # Si se identificaron hallazgos estructurados para las partes y representantes, responder directamente
         if matched_findings:

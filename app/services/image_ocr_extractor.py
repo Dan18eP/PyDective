@@ -174,15 +174,28 @@ def extract_page_ocr_cross_platform(
 
 def process_scanned_page_and_inject(
     page: pymupdf.Page,
-    dpi: int = 150,
+    dpi: int = 120,
 ) -> Tuple[str, List[Dict[str, Any]], List[MetadatoImagen]]:
     """
     Procesa integralmente un folio escaneado:
-    1. Extrae el texto mediante OCR local multiplataforma reutilizando un único render de imagen.
-    2. Inyecta la capa de texto invisible (render_mode=3) en el PDF en RAM.
-    3. Detecta y cataloga elementos visuales (firmas, sellos, códigos QR/barras) sin re-renderizar.
+    1. Descarte ultrarrápido de páginas en blanco vía thumbnail (< 5 ms).
+    2. Extrae el texto mediante OCR local multiplataforma reutilizando un único render de imagen.
+    3. Inyecta la capa de texto invisible (render_mode=3) en el PDF en RAM.
+    4. Detecta y cataloga elementos visuales (firmas, sellos, códigos QR/barras) sin re-renderizar.
     """
     page_rect = page.rect
+    if page_rect.width <= 0 or page_rect.height <= 0:
+        return "", [], []
+
+    # 0. Descarte instantáneo de dorsos o páginas en blanco vía thumbnail (< 5 ms)
+    try:
+        thumb = page.get_pixmap(dpi=20, alpha=False)
+        thumb_arr = np.frombuffer(thumb.samples, dtype=np.uint8)
+        if float(np.std(thumb_arr)) < 10.0 and float(np.mean(thumb_arr)) > 245.0:
+            return "", [], []
+    except Exception:
+        pass
+
     pix = page.get_pixmap(dpi=dpi, alpha=False)
     scale_x = pix.width / page_rect.width if page_rect.width > 0 else 1.0
     scale_y = pix.height / page_rect.height if page_rect.height > 0 else 1.0

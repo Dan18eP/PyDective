@@ -24,13 +24,13 @@ def get_ocr_engine():
         try:
             from rapidocr_onnxruntime import RapidOCR
             _OCR_ENGINE = RapidOCR(
-                intra_op_num_threads=2,
+                intra_op_num_threads=6,
                 use_cls=False,
-                det_limit_side_len=960,
+                det_limit_side_len=720,
                 det_limit_type="max",
-                rec_batch_num=12,
+                rec_batch_num=16,
             )
-            logger.info("Motor RapidOCR optimizado (2 hilos/worker, batch=12, use_cls=False, Det max=960) inicializado.")
+            logger.info("Motor RapidOCR optimizado (6 hilos CPU, batch=16, use_cls=False, Det max=720) inicializado.")
         except Exception as exc:
             logger.warning("RapidOCR no disponible en el entorno local: %s", exc)
             _OCR_ENGINE = None

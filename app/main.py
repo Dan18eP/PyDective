@@ -521,26 +521,6 @@ async def procesar_documento(
 
         try:
             ai_queue = []
-            ocr_cache = {}
-            if motor_vision in ("rapidocr", "dual") and total_pages > 1:
-                scanned_indices = [
-                    idx for idx in range(total_pages)
-                    if len(doc[idx].get_text().strip()) == 0
-                ]
-                if len(scanned_indices) > 1:
-                    def _pre_extract_ocr(idx):
-                        t0_sub = time.perf_counter()
-                        sub_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                        txt, bxs, vis = process_scanned_page_and_inject(sub_doc[idx])
-                        sub_doc.close()
-                        ms = (time.perf_counter() - t0_sub) * 1000
-                        return idx, txt, bxs, vis, ms
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-                        results = list(pool.map(_pre_extract_ocr, scanned_indices))
-                    ocr_cache = {idx: (txt, bxs, vis, ms) for idx, txt, bxs, vis, ms in results}
-
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
                 page = doc[p_idx]
@@ -573,15 +553,11 @@ async def procesar_documento(
 
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                        if p_idx in ocr_cache:
-                            ocr_full_text, ocr_boxes, ocr_visuals, ocr_ms = ocr_cache[p_idx]
-                            if ocr_boxes:
-                                inject_ocr_text_layer(page, ocr_boxes)
-                        else:
-                            t_ocr0 = time.perf_counter()
-                            from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                            ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
-                            ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        t_ocr0 = time.perf_counter()
+                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                        ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
+                        ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
                             existing_ids = {v.id_imagen for v in page_visuals}
@@ -858,34 +834,6 @@ async def procesar_documento_stream(
             all_florence_raw = []
             markdown_pages_list = []
 
-            ocr_cache = {}
-            if motor_vision in ("rapidocr", "dual") and total_pages > 1:
-                scanned_indices = [
-                    idx for idx in range(total_pages)
-                    if len(doc[idx].get_text().strip()) == 0
-                ]
-                if len(scanned_indices) > 1:
-                    yield f"data: {json.dumps({'tipo': 'progreso_motor', 'motor': 'rapidocr', 'numero_pagina': 1, 'estado': f'Procesando {len(scanned_indices)} folios escaneados en paralelo con RapidOCR...'})}\n\n"
-                    await asyncio.sleep(0.01)
-
-                    loop = asyncio.get_running_loop()
-                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
-                    def _task_ocr(idx):
-                        t0_sub = time.perf_counter()
-                        sub_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                        txt, bxs, vis = process_scanned_page_and_inject(sub_doc[idx])
-                        sub_doc.close()
-                        ms = (time.perf_counter() - t0_sub) * 1000
-                        return idx, txt, bxs, vis, ms
-
-                    tasks = [loop.run_in_executor(executor, _task_ocr, idx) for idx in scanned_indices]
-                    for f in asyncio.as_completed(tasks):
-                        idx, txt, bxs, vis, ms = await f
-                        ocr_cache[idx] = (txt, bxs, vis, ms)
-                    executor.shutdown(wait=False)
-
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
                 page = doc[p_idx]
@@ -922,15 +870,10 @@ async def procesar_documento_stream(
 
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                        if p_idx in ocr_cache:
-                            ocr_full_text, ocr_boxes, ocr_visuals, ocr_ms = ocr_cache[p_idx]
-                            if ocr_boxes:
-                                inject_ocr_text_layer(page, ocr_boxes)
-                        else:
-                            t_ocr0 = time.perf_counter()
-                            from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                            ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
-                            ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        t_ocr0 = time.perf_counter()
+                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                        ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
+                        ocr_ms = (time.perf_counter() - t_ocr0) * 1000
                         total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text

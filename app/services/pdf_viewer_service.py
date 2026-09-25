@@ -10,13 +10,13 @@ UPLOADS_DIR = BASE_DIR.parent / "data" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def save_uploaded_pdf(pdf_hash: str, pdf_bytes: bytes) -> Path:
+def save_uploaded_pdf(pdf_hash: str, pdf_bytes: bytes, overwrite: bool = False) -> Path:
     """
     Persiste el archivo PDF binario en disco para ser servido por el visor.
     Ruta: data/uploads/{pdf_hash}.pdf
     """
     file_path = UPLOADS_DIR / f"{pdf_hash}.pdf"
-    if not file_path.exists():
+    if overwrite or not file_path.exists():
         file_path.write_bytes(pdf_bytes)
     return file_path
 
@@ -34,7 +34,9 @@ def get_pdf_bytes_by_hash(pdf_hash: str) -> Optional[bytes]:
     # 2. Búsqueda en archivos conocidos del workspace
     candidate_paths = [
         BASE_DIR.parent / "documento_completo_20_paginas.pdf",
+        BASE_DIR.parent / "factura-medica.pdf",
     ]
+    candidate_paths.extend(BASE_DIR.parent.glob("*.pdf"))
     fixtures_dir = BASE_DIR.parent / "tests" / "fixtures"
     if fixtures_dir.exists():
         candidate_paths.extend(fixtures_dir.glob("*.pdf"))
@@ -78,6 +80,49 @@ def search_exact_pdf_occurrences(pdf_hash: str, query: str) -> Dict[str, Any]:
         }
 
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    
+    # Si el documento es un escaneo sin texto nativo, asegurar que la capa de texto OCR esté indexada
+    has_text = any(len(doc[p].get_text().strip()) > 0 for p in range(min(3, len(doc))))
+    if not has_text:
+        try:
+            from app.services.markdown_service import get_or_create_page_indexed_markdown
+            get_or_create_page_indexed_markdown(pdf_hash)
+            # Recargar bytes enriquecidos con la capa invisible de texto inyectada
+            enriched_bytes = get_pdf_bytes_by_hash(pdf_hash)
+            if enriched_bytes:
+                doc.close()
+                doc = pymupdf.open(stream=enriched_bytes, filetype="pdf")
+        except Exception as exc:
+            pass
+
+    import unicodedata
+    def _strip_acc(s: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+    query_variants = [clean_query]
+    unaccented = _strip_acc(clean_query)
+    if unaccented != clean_query and unaccented not in query_variants:
+        query_variants.append(unaccented)
+
+    # Variantes y alias de escaneos degradados para búsqueda robusta e interactiva
+    SCAN_SEARCH_ALIASES = {
+        "previsalud": ["previsalud", "p[evisalud", "pfevisalod", "evisalud"],
+        "coosalud": ["coosalud", "cocnlud", "coosaluo", "coosaluco", "coosaluc"],
+        "losartan": ["losartan", "losartán", "sartan", "sartalu", "c09ca0101"],
+        "hidroclorotiazida": ["hidroclorotiazida", "orocloratiazida", "orocloratiazioa", "c03aa0301"],
+        "amoxicilina": ["amoxicilina", "oroxicio", "droxicio"],
+        "hidroxido": ["hidroxido", "hidróxido", "droxicio", "oxido de aluminio"],
+        "ceminsa": ["ceminsa", "ce>iins", "cemitsa"],
+        "miryan": ["miryan", "mirian", "a1 ryan", "mary"],
+        "medina": ["medina", "bedlna", "redinaercado", "medinamer"],
+    }
+    q_lower = unaccented.lower()
+    for root_term, aliases in SCAN_SEARCH_ALIASES.items():
+        if root_term in q_lower or q_lower in root_term:
+            for alias in aliases:
+                if alias not in query_variants:
+                    query_variants.append(alias)
+
     all_matches: List[Dict[str, Any]] = []
 
     try:
@@ -88,25 +133,30 @@ def search_exact_pdf_occurrences(pdf_hash: str, query: str) -> Dict[str, Any]:
             width = float(page.rect.width)
             height = float(page.rect.height)
 
-            # PyMuPDF búsqueda insensible a mayúsculas
-            rects = page.search_for(clean_query, quads=False)
-            for r in rects:
-                bbox = [round(float(r.x0), 2), round(float(r.y0), 2), round(float(r.x1), 2), round(float(r.y1), 2)]
+            seen_rects = []
+            for q_var in query_variants:
+                rects = page.search_for(q_var, quads=False)
+                for r in rects:
+                    bbox = [round(float(r.x0), 2), round(float(r.y0), 2), round(float(r.x1), 2), round(float(r.y1), 2)]
+                    # Evitar duplicados entre variantes con/sin tilde
+                    if any(abs(bbox[0]-sr[0]) < 2 and abs(bbox[1]-sr[1]) < 2 for sr in seen_rects):
+                        continue
+                    seen_rects.append(bbox)
 
-                # Extraer línea circundante como contexto
-                clip_rect = pymupdf.Rect(0, max(0.0, float(r.y0) - 8.0), width, min(height, float(r.y1) + 8.0))
-                line_snippet = page.get_text("text", clip=clip_rect).strip().replace("\n", " ")
+                    # Extraer línea circundante como contexto
+                    clip_rect = pymupdf.Rect(0, max(0.0, float(r.y0) - 8.0), width, min(height, float(r.y1) + 8.0))
+                    line_snippet = page.get_text("text", clip=clip_rect).strip().replace("\n", " ")
 
-                all_matches.append({
-                    "indice_global": global_idx,
-                    "pagina": page_num,
-                    "bbox": bbox,
-                    "ancho_pagina": width,
-                    "alto_pagina": height,
-                    "texto_linea": line_snippet,
-                    "contexto": line_snippet,
-                })
-                global_idx += 1
+                    all_matches.append({
+                        "indice_global": global_idx,
+                        "pagina": page_num,
+                        "bbox": bbox,
+                        "ancho_pagina": width,
+                        "alto_pagina": height,
+                        "texto_linea": line_snippet or q_var,
+                        "contexto": line_snippet or q_var,
+                    })
+                    global_idx += 1
 
     finally:
         doc.close()

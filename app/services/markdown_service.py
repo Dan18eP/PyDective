@@ -20,17 +20,21 @@ logger = logging.getLogger("pydective.markdown")
 def generate_page_indexed_markdown(
     pdf_bytes: bytes,
     metadatos_visuales_por_pagina: Optional[Dict[int, List[MetadatoImagen]]] = None,
+    pdf_hash: Optional[str] = None,
 ) -> str:
     """
     Pipeline de procesamiento 100% en memoria (RAM) optimizado para LLMs.
     1. Abre el PDF con PyMuPDF.
     2. Segmenta virtualmente cada página en memoria.
     3. Convierte cada página a Markdown con MarkItDown (convert_stream).
-    4. Inyecta anclas semánticas de imágenes y comentarios HTML estándar:
+    4. Si la página es escaneada, ejecuta OCR local multiplataforma de alta resolución (DPI 200)
+       e inyecta la capa invisible de texto (render_mode=3).
+    5. Aplica saneamiento pericial (Text Healing) para eliminar mojibake y ruido OCR.
+    6. Inyecta anclas semánticas de imágenes y comentarios HTML estándar:
        <!-- INICIO_PAGINA_X -->
        ...
        <!-- FIN_PAGINA_X -->
-    5. Consolida todas las páginas en un String unificado.
+    7. Consolida todas las páginas en un String unificado.
     """
     if not pdf_bytes:
         return ""
@@ -38,6 +42,7 @@ def generate_page_indexed_markdown(
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
     pages_output: List[str] = []
+    any_injected_ocr = False
 
     for idx in range(total_pages):
         page_num = idx + 1
@@ -63,18 +68,23 @@ def generate_page_indexed_markdown(
             page_text = doc[idx].get_text("text").strip()
 
         # Si aún no hay texto sustantivo (<20 caracteres) y la página es un escaneo o imagen,
-        # ejecutar OCR local multiplataforma (Windows Native OCR / RapidOCR) de inmediato
+        # ejecutar OCR local multiplataforma (Windows Native OCR / RapidOCR) con DPI 200
         if len(page_text) < 20:
             try:
                 from app.services.image_ocr_extractor import is_page_scanned_image, extract_page_ocr_cross_platform
                 if is_page_scanned_image(doc[idx]):
-                    ocr_text, ocr_boxes = extract_page_ocr_cross_platform(doc[idx])
+                    ocr_text, ocr_boxes = extract_page_ocr_cross_platform(doc[idx], dpi=200)
                     if ocr_text and ocr_text.strip():
                         page_text = ocr_text.strip()
                         from app.services.ocr_service import inject_ocr_text_layer
                         inject_ocr_text_layer(doc[idx], ocr_boxes)
+                        any_injected_ocr = True
             except Exception as exc:
                 logger.debug(f"Error ejecutando OCR en página {page_num}: {exc}")
+
+        # Saneamiento fonético-ortográfico y des-corrupción de glifos en español (Text Healing)
+        from app.services.text_healing_service import heal_scanned_text
+        page_text = heal_scanned_text(page_text)
 
         # Normalizar espacios horizontales redundantes preservando saltos de línea
         page_text = re.sub(r"[ \t]{2,}", " ", page_text)
@@ -95,6 +105,13 @@ def generate_page_indexed_markdown(
         # Estándar de marcación de páginas invisible para frontend
         marked_page = f"<!-- INICIO_PAGINA_{page_num} -->\n{page_text}\n<!-- FIN_PAGINA_{page_num} -->"
         pages_output.append(marked_page)
+
+    if pdf_hash and any_injected_ocr:
+        try:
+            from app.services.pdf_viewer_service import save_uploaded_pdf
+            save_uploaded_pdf(pdf_hash, doc.tobytes(), overwrite=True)
+        except Exception as exc:
+            logger.debug(f"No se pudo persistir PDF enriquecido con texto OCR: {exc}")
 
     doc.close()
     return "\n\n".join(pages_output)
@@ -125,7 +142,7 @@ def get_or_create_page_indexed_markdown(
             if getattr(res, "metadatos_visuales", None):
                 visuals_by_page[res.numero_pagina] = res.metadatos_visuales
 
-    markdown_doc = generate_page_indexed_markdown(pdf_bytes, visuals_by_page)
+    markdown_doc = generate_page_indexed_markdown(pdf_bytes, visuals_by_page, pdf_hash=pdf_hash)
 
     if l1_entry:
         l1_entry.documento_markdown_indexado = markdown_doc

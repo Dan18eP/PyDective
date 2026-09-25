@@ -112,9 +112,10 @@ def extract_page_ocr_cross_platform(
                 boxes = []
                 clean_lines = []
 
+                from app.services.text_healing_service import heal_scanned_text
                 for item in lines_data:
                     raw_txt = item.get("text", "").strip()
-                    c_txt = clean_ocr_line(raw_txt)
+                    c_txt = heal_scanned_text(clean_ocr_line(raw_txt))
                     if not c_txt:
                         continue
                     clean_lines.append(c_txt)

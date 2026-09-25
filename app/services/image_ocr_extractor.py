@@ -78,7 +78,18 @@ def extract_page_ocr_cross_platform(
     # 3. Preprocesamiento Otsu (Binarización adaptativa ante bajo contraste o sombras de escaneo)
     img_rgb, otsu_applied = evaluate_contrast_and_otsu(img_rgb)
 
-    # 4. Ejecución en Windows con motor nativo acelerado (Air-Gap)
+    # 2. Motor Primario: RapidOCR (ONNX Runtime / DBNet + CRNN) para máxima precisión
+    try:
+        from app.services.ocr_service import extract_page_ocr, is_ocr_available
+        if is_ocr_available():
+            text, boxes = extract_page_ocr(page, dpi=max(dpi, 200))
+            if text and len(text.strip()) > 10:
+                logger.info(f"[OCR] Página {page.number + 1} procesada exitosamente con RapidOCR: {len(boxes)} cajas de texto.")
+                return text, boxes
+    except Exception as exc:
+        logger.warning(f"Error o indisponibilidad en RapidOCR para página {page.number + 1}: {exc}")
+
+    # 3. Fallback: OCR nativo de Windows (Windows.Media.Ocr vía PowerShell)
     if sys.platform == "win32" and WIN_OCR_SCRIPT.exists():
         temp_img = None
         try:
@@ -104,7 +115,6 @@ def extract_page_ocr_cross_platform(
                 try:
                     data = json.loads(res.stdout.strip(), strict=False)
                 except Exception:
-                    # Fallback ante caracteres raros
                     import re
                     clean_stdout = re.sub(r"[\x00-\x1f]", " ", res.stdout.strip())
                     data = json.loads(clean_stdout, strict=False)
@@ -155,15 +165,6 @@ def extract_page_ocr_cross_platform(
                     os.remove(temp_img)
                 except Exception:
                     pass
-
-    # 2. Fallback con RapidOCR si está disponible
-    try:
-        from app.services.ocr_service import extract_page_ocr
-        text, boxes = extract_page_ocr(page, dpi=dpi)
-        if text:
-            return text, boxes
-    except Exception:
-        pass
 
     return "", []
 

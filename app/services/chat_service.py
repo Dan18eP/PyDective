@@ -164,6 +164,25 @@ def process_chat_query(
                 pass
 
     if l1_entry is None and fallback_job is None:
+        # Intentar auto-hidratar L1 a partir del PDF si existe en disco o uploads
+        from app.services.pdf_viewer_service import get_pdf_bytes_by_hash
+        p_bytes = get_pdf_bytes_by_hash(pdf_hash)
+        if p_bytes:
+            from app.services.markdown_service import get_or_create_page_indexed_markdown
+            md_doc = get_or_create_page_indexed_markdown(pdf_hash, pdf_bytes=p_bytes)
+            import pymupdf
+            doc = pymupdf.open(stream=p_bytes, filetype="pdf")
+            p_total = len(doc)
+            doc.close()
+            l1_entry = L1DocumentEntry(
+                pdf_hash=pdf_hash,
+                paginas_totales=p_total,
+                paginas_completadas=p_total,
+                documento_markdown_indexado=md_doc,
+            )
+            set_l1_cache(pdf_hash, l1_entry)
+
+    if l1_entry is None and fallback_job is None:
         raise DocumentoNoEncontradoOExpiradoError(pdf_hash)
 
     GENERIC_STOP_TOKENS = {

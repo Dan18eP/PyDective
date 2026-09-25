@@ -67,3 +67,7 @@ data/uploads/*.pdf
 
 # 100 multi-format test fixtures suite
 tests/fixtures_100/
+
+# Generated export PDFs
+informe_pericial_multimodal_2026.pdf
+

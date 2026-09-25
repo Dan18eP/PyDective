@@ -198,9 +198,21 @@ def set_l1_cache(
     key = build_l1_key(pdf_hash, pipeline_version=pipeline_version)
     serialized = orjson.dumps(entry.model_dump())
     in_memory_lru.set_raw(key, serialized)
-
     # US-19 Escenario 2: Invalidación automática en cascada de L2
     invalidate_l2_cache(pdf_hash, pipeline_version=pipeline_version)
+
+
+def invalidate_l1_cache(
+    pdf_hash: str,
+    pipeline_version: str = "2.2",
+) -> bool:
+    """
+    Invalida la caché L1 e invalida en cascada la caché L2.
+    """
+    key = build_l1_key(pdf_hash, pipeline_version=pipeline_version)
+    deleted = in_memory_lru.delete(key)
+    invalidate_l2_cache(pdf_hash, pipeline_version=pipeline_version)
+    return deleted
 
 
 def resolve_from_l1(

@@ -68,6 +68,83 @@ def test_chat_contact_and_address(factura_medica_hash):
     assert "[Página 3]" in res.citas
     assert "Sabanalarga" in res.respuesta
     assert "Calle 28" in res.respuesta
+    assert "3013188556" in res.respuesta
+
+
+def test_chat_cliente_institutional_and_patient(factura_medica_hash):
+    """Verifica diferenciación entre cliente institucional (Coosalud EPS) y paciente titular."""
+    res = process_chat_query(factura_medica_hash, "cliente")
+    assert res is not None
+    assert "[Página 1]" in res.citas
+    assert "Coosalud EPS" in res.respuesta
+    assert "Miryan Esther Medina Mercado" in res.respuesta
+    assert "32.848.952" in res.respuesta or "32848952" in res.respuesta
+
+
+def test_chat_quien_recibe(factura_medica_hash):
+    """Verifica quién recibe y reclama los medicamentos en el acta de entrega."""
+    res = process_chat_query(factura_medica_hash, "quien recibe")
+    assert res is not None
+    assert "[Página 1]" in res.citas
+    assert "Miryan Esther Medina Mercado" in res.respuesta
+    assert "32.848.952" in res.respuesta or "32848952" in res.respuesta
+    assert "firma" in res.respuesta.lower() or "constancia" in res.respuesta.lower()
+
+
+def test_chat_sucursal_y_punto(factura_medica_hash):
+    """Verifica detección de sucursal 1012 y sedes asistenciales."""
+    res_suc = process_chat_query(factura_medica_hash, "sucursal")
+    assert res_suc is not None
+    assert "[Página 1]" in res_suc.citas
+    assert "[Página 3]" in res_suc.citas
+    assert "1012" in res_suc.respuesta
+    assert "Sabanalarga" in res_suc.respuesta
+
+    res_punto = process_chat_query(factura_medica_hash, "cual es el punto")
+    assert res_punto is not None
+    assert "1012" in res_punto.respuesta
+
+
+def test_chat_tipo_doc(factura_medica_hash):
+    """Verifica catalogación de los tipos documentales presentes en el expediente."""
+    res = process_chat_query(factura_medica_hash, "tipo doc")
+    assert res is not None
+    assert "[Página 1]" in res.citas
+    assert "[Página 3]" in res.citas
+    assert "[Página 5]" in res.citas
+    assert "[Página 7]" in res.citas
+    assert "Acta de Entrega" in res.respuesta
+    assert "Órdenes Médicas" in res.respuesta or "Ordenes Medicas" in res.respuesta
+    assert "Cédulas de Ciudadanía" in res.respuesta or "Cedulas de Ciudadania" in res.respuesta
+
+
+def test_chat_diagnostico_principal(factura_medica_hash):
+    """Verifica extracción exacta del diagnóstico principal CIE-10."""
+    res = process_chat_query(factura_medica_hash, "diagnostico principal")
+    assert res is not None
+    assert "[Página 3]" in res.citas
+    assert "I10X" in res.respuesta
+    assert "Hipertensión Esencial" in res.respuesta or "HIPERTENSI" in res.respuesta
+
+
+def test_chat_aseguradora(factura_medica_hash):
+    """Verifica extracción de la EPS / aseguradora."""
+    res = process_chat_query(factura_medica_hash, "aseguradora cual es")
+    assert res is not None
+    assert "[Página 1]" in res.citas or "[Página 3]" in res.citas
+    assert "Coosalud EPS" in res.respuesta
+
+
+def test_chat_visual_diagrama_barras_disambiguation():
+    """Verifica que 'diagrama de barras' en documento de 20 páginas aísle exclusivamente la Página 2."""
+    doc_path = Path(__file__).resolve().parent.parent.parent / "documento_completo_20_paginas.pdf"
+    if not doc_path.exists():
+        pytest.skip("documento_completo_20_paginas.pdf no encontrado en la raíz")
+    h = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+    res = process_chat_query(h, "de que trata el diagrama de barras")
+    assert res is not None
+    assert res.citas == ["[Página 2]"]
+    assert "COMPORTAMIENTO FINANCIERO TRIMESTRAL" in res.respuesta
 
 
 def test_ctrl_f_search_in_scanned_images(factura_medica_hash):

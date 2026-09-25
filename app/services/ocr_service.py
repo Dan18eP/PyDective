@@ -106,7 +106,8 @@ def extract_page_ocr(
         raw_text = str(item[1]).strip()
         score = float(item[2])
 
-        cleaned_text = clean_ocr_line(raw_text)
+        from app.services.text_healing_service import heal_scanned_text
+        cleaned_text = heal_scanned_text(clean_ocr_line(raw_text))
         if not cleaned_text:
             continue
 

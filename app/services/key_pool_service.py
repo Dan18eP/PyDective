@@ -46,6 +46,10 @@ class KeyPoolManager:
         """
         now = time.time()
         with self._lock:
+            if not self._keys and settings.api_keys_list:
+                for k in settings.api_keys_list:
+                    self._keys[k] = KeyStatus(key=k)
+
             for k, entry in self._keys.items():
                 if entry.status == EstadoKey.COOLDOWN and now >= entry.cooldown_until:
                     entry.status = EstadoKey.HEALTHY

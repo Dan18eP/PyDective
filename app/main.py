@@ -544,20 +544,10 @@ async def procesar_documento(
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
                         t_ocr0 = time.perf_counter()
-                        if settings.LLM_PROVIDER == "local":
-                            from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                            ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
-                            if ocr_full_text.strip():
-                                page_text = ocr_full_text
-                                existing_ids = {v.id_imagen for v in page_visuals}
-                                for v in ocr_visuals:
-                                    if v.id_imagen not in existing_ids:
-                                        page_visuals.append(v)
-                        else:
-                            ocr_full_text, ocr_boxes = extract_page_ocr(page)
-                            if ocr_full_text.strip():
-                                page_text = ocr_full_text
-                                inject_ocr_text_layer(page, ocr_boxes)
+                        ocr_full_text, ocr_boxes = extract_page_ocr(page)
+                        if ocr_full_text.strip():
+                            page_text = ocr_full_text
+                            inject_ocr_text_layer(page, ocr_boxes)
                         ocr_ms = (time.perf_counter() - t_ocr0) * 1000
                         total_rapid_ms += ocr_ms
 
@@ -583,7 +573,7 @@ async def procesar_documento(
                         for h in f_domain:
                             page_evidences.extend(h.evidencias)
 
-                # Inferencia Gemini solo en modo rapidocr clásico si la página lo requiere
+                # Inferencia multimodal en /procesar cuando la página lo requiere
                 if classification.tipo == TipoPagina.NEEDS_AI and motor_vision == "rapidocr":
                     t_ren = time.perf_counter()
                     webp_bytes = get_or_render_page_webp(page, pdf_hash, p_num, max_dim=1024, quality=75)

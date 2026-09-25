@@ -85,6 +85,17 @@ SYNONYM_MAP: Dict[str, List[str]] = {
     "sello": [
         "sello", "sellos", "estampilla", "notaria", "autenticado", "timbre"
     ],
+    "empresa": [
+        "empresa", "entidad", "institucion", "ips", "eps", "previsalud", "ceminsa",
+        "prestador", "proveedor", "contratista", "contratante", "cliente", "sociedad"
+    ],
+    "previsalud": [
+        "previsalud", "ceminsa", "ips", "eps", "salud", "empresa", "entidad", "prestador", "medicamentos"
+    ],
+    "medicamento": [
+        "medicamento", "medicamentos", "formula", "receta", "posologia", "farmacia",
+        "dispensacion", "entrega", "dispositivo", "dispositivos", "capsula", "tableta"
+    ],
 }
 
 
@@ -286,11 +297,17 @@ def _search_visual_query(
     citas = [f"[Página {p}]" for p in matching_pages]
     citas_str = ", ".join(citas)
 
-    # Detectar si el usuario especificó una página concreta (ej: "de la pagina 2", "en pag 5", "folio 3")
+    # 1. Detectar si el usuario especificó una página concreta (ej: "de la pagina 2", "en pag 5", "folio 3")
     target_page = None
     target_match = re.search(r"\b(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*(\d+)\b", pregunta_norm)
     if target_match:
         target_page = int(target_match.group(1))
+
+    # 2. Detectar si el usuario especificó un ítem visual concreto (ej: "imagen 1", "foto 2", "figura 1", "diagrama 3", "sello 1")
+    target_item_num = None
+    item_match = re.search(r"\b(?:imagen|foto|fotografia|figura|diagrama|sello|firma)\s*(\d+)\b", pregunta_norm)
+    if item_match and target_page is None:
+        target_item_num = int(item_match.group(1))
 
     if target_page is not None:
         p_items = [d.replace(f"[Página {target_page}]: ", "") for d in item_descriptions if f"[Página {target_page}]" in d]
@@ -310,6 +327,28 @@ def _search_visual_query(
                 respuesta=f"En la {cita} no se identificaron elementos visuales. Los elementos visuales registrados en el documento se encuentran en: {citas_str}.",
                 citas=citas,
                 evidencias_relacionadas=[],
+            )
+
+    if target_item_num is not None:
+        # Resolver el ítem específico por índice 1-based en el catálogo de elementos visuales
+        if 1 <= target_item_num <= len(item_descriptions):
+            chosen_item = item_descriptions[target_item_num - 1]
+            chosen_ev = evidences[target_item_num - 1] if target_item_num - 1 < len(evidences) else None
+            cita_page_match = re.search(r"\[Página\s+(\d+)\]", chosen_item)
+            citas_item = [cita_page_match.group(0)] if cita_page_match else [citas[0]]
+            detalles_clean = re.sub(r"^\[Página\s+\d+\]:\s*", "", chosen_item)
+            respuesta = f"El elemento visual #{target_item_num} ({citas_item[0]}) corresponde a: {detalles_clean}."
+            return ChatOutput(
+                respuesta=respuesta,
+                citas=citas_item,
+                evidencias_relacionadas=[chosen_ev] if chosen_ev else [],
+            )
+        else:
+            respuesta = f"El documento contiene {len(item_descriptions)} elemento(s) visual(es) registrados en {citas_str}."
+            return ChatOutput(
+                respuesta=respuesta,
+                citas=citas,
+                evidencias_relacionadas=evidences[:2],
             )
 
     if is_detail_query:

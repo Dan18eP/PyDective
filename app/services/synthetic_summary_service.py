@@ -33,10 +33,11 @@ def detect_document_archetype(markdown_doc: str, page_1_text: str = "") -> str:
         "factura", "paciente", "ips", "eps", "salud", "copago", "cuota moderadora",
         "cie-10", "cie10", "procedimiento", "medico", "medicos", "diagnostico", "atencion medica",
         "hospital", "clinica", "historia clinica", "orden medica", "recibo de caja",
-        "medicamento", "medicamentos", "formula", "formula medica", "dispensa", "entrega de medicamentos"
+        "medicamento", "medicamentos", "formula", "formula medica", "dispensa", "entrega de medicamentos",
+        "previsalud", "previsalod", "ceminsa", "farmacia", "usuario", "subsidiado"
     )
     medical_hits = sum(1 for m in medical_markers if m in sample_text)
-    if medical_hits >= 2 or ("paciente" in sample_text and any(k in sample_text for k in ("factura", "eps", "ips", "salud", "copago"))):
+    if medical_hits >= 2 or any(k in sample_text for k in ("previsalud", "previsalod", "ceminsa", "entrega oe medicamentos", "entrega de medicamentos")) or ("paciente" in sample_text and any(k in sample_text for k in ("factura", "eps", "ips", "salud", "copago"))):
         return "FACTURA_MEDICA"
 
     # 2. Contrato
@@ -119,7 +120,14 @@ def generate_synthetic_executive_summary(
     # ARQUETIPO 1: FACTURA MÉDICA / CUENTA DE SALUD
     # =========================================================================
     if archetype == "FACTURA_MEDICA":
-        entidad = findings_map.get("proveedor") or findings_map.get("ips") or findings_map.get("clinica") or "Institución Prestadora de Servicios de Salud (IPS)"
+        entidad_candidate = None
+        p1_lower = p1_content.lower()
+        if "previsalud" in p1_lower or "previsalod" in p1_lower:
+            entidad_candidate = "Previsalud (Dispensación Farmacéutica)"
+        elif "ceminsa" in p1_lower:
+            entidad_candidate = "E.S.E. CEMINSA (Sede Paraíso)"
+
+        entidad = findings_map.get("proveedor") or findings_map.get("ips") or findings_map.get("clinica") or entidad_candidate or "Institución Prestadora de Servicios de Salud (IPS)"
         paciente = findings_map.get("cliente") or findings_map.get("paciente") or findings_map.get("titular") or "Paciente registrado en el folio"
         total = findings_map.get("total") or findings_map.get("valor declarado") or "Registrado en el detalle económico"
         fecha = findings_map.get("fecha") or "Conforme a radicación de la orden"

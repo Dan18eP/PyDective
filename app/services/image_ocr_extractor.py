@@ -59,13 +59,32 @@ def extract_page_ocr_cross_platform(
     scale_x = pix.width / page_rect.width
     scale_y = pix.height / page_rect.height
 
-    # 1. Ejecución en Windows con motor nativo acelerado (Air-Gap)
+    img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
+
+    # 1. Detección ultrarrápida de página en blanco (dorsos vacíos como páginas 2 y 4)
+    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    std_dev = float(np.std(gray))
+    mean_val = float(np.mean(gray))
+    if std_dev < 10.0 and mean_val > 245.0:
+        logger.info(f"[OCR] Página {page.number + 1} detectada como dorso en blanco (std={std_dev:.1f}, mean={mean_val:.1f}). Omitiendo OCR en 2 ms.")
+        return "", []
+
+    # 2. Preprocesamiento Deskew (Enderezado de rotación con Hough / minAreaRect en C++)
+    from app.services.preprocess_service import detect_skew_angle, deskew_image, evaluate_contrast_and_otsu
+    skew_angle = detect_skew_angle(img_rgb, max_angle=15.0)
+    if abs(skew_angle) >= 0.4:
+        img_rgb = deskew_image(img_rgb, angle=skew_angle)
+
+    # 3. Preprocesamiento Otsu (Binarización adaptativa ante bajo contraste o sombras de escaneo)
+    img_rgb, otsu_applied = evaluate_contrast_and_otsu(img_rgb)
+
+    # 4. Ejecución en Windows con motor nativo acelerado (Air-Gap)
     if sys.platform == "win32" and WIN_OCR_SCRIPT.exists():
         temp_img = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                 temp_img = f.name
-            pix.save(temp_img)
+            cv2.imwrite(temp_img, cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
 
             cmd = [
                 "powershell",
@@ -82,7 +101,13 @@ def extract_page_ocr_cross_platform(
                 timeout=15,
             )
             if res.returncode == 0 and res.stdout.strip():
-                data = json.loads(res.stdout.strip())
+                try:
+                    data = json.loads(res.stdout.strip(), strict=False)
+                except Exception:
+                    # Fallback ante caracteres raros
+                    import re
+                    clean_stdout = re.sub(r"[\x00-\x1f]", " ", res.stdout.strip())
+                    data = json.loads(clean_stdout, strict=False)
                 lines_data = data.get("lines", [])
                 boxes = []
                 clean_lines = []

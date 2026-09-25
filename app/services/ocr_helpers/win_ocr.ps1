@@ -3,6 +3,9 @@ param (
     [string]$ImagePath
 )
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTaskGeneric = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }[0]
 
@@ -56,14 +59,16 @@ foreach ($line in $result.Lines) {
         if (($r.Y + $r.Height) -gt $maxY) { $maxY = ($r.Y + $r.Height) }
     }
 
+    $cleanLine = $line.Text -replace "[\x00-\x1f]", " "
     $linesData += @{
-        text = $line.Text
+        text = $cleanLine
         bbox = @($minX, $minY, $maxX, $maxY)
     }
 }
 
+$cleanAllText = $result.Text -replace "[\x00-\x1f]", " "
 $output = @{
-    text = $result.Text
+    text = $cleanAllText
     lines = $linesData
 }
 

@@ -15,6 +15,7 @@ def save_uploaded_pdf(pdf_hash: str, pdf_bytes: bytes, overwrite: bool = False) 
     Persiste el archivo PDF binario en disco para ser servido por el visor.
     Ruta: data/uploads/{pdf_hash}.pdf
     """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     file_path = UPLOADS_DIR / f"{pdf_hash}.pdf"
     if overwrite or not file_path.exists():
         file_path.write_bytes(pdf_bytes)
@@ -50,6 +51,7 @@ def get_pdf_bytes_by_hash(pdf_hash: str) -> Optional[bytes]:
             data = cand.read_bytes()
             if hashlib.sha256(data).hexdigest() == pdf_hash:
                 # Cachear en uploads para futuros accesos directos
+                UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
                 target_file.write_bytes(data)
                 return data
 

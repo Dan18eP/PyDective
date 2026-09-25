@@ -140,6 +140,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 def save_job_result(pdf_hash: str, output: JobOutput) -> None:
     MOCK_RESULTS_STORE[pdf_hash] = output
     try:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         path = RESULTS_DIR / f"{pdf_hash}.json"
         path.write_text(output.model_dump_json(indent=2), encoding="utf-8")
     except Exception as exc:
@@ -474,7 +475,8 @@ async def procesar_documento(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
+    bytes_to_save = pdf_bytes if pdf_bytes.startswith(b"%PDF") else doc.convert_to_pdf()
+    save_uploaded_pdf(pdf_hash, bytes_to_save, overwrite=True)
 
     cache_query_key = query_hash if motor_vision == "rapidocr" else f"{query_hash}_{motor_vision}"
 
@@ -758,7 +760,8 @@ async def procesar_documento_stream(
     # 2. Ingesta y validación en memoria (US-01, US-03, RNF-022, RV-001, RV-002, RV-003, RV-006)
     pdf_bytes = await file.read()
     pdf_hash, doc, total_pages = validate_and_read_pdf(pdf_bytes, filename=file.filename)
-    save_uploaded_pdf(pdf_hash, doc.convert_to_pdf())
+    bytes_to_save = pdf_bytes if pdf_bytes.startswith(b"%PDF") else doc.convert_to_pdf()
+    save_uploaded_pdf(pdf_hash, bytes_to_save, overwrite=True)
 
     cache_query_key = query_hash if motor_vision == "rapidocr" else f"{query_hash}_{motor_vision}"
 

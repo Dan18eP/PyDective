@@ -92,8 +92,14 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Lifecycle startup
+    # Lifecycle startup: Precargar modelos en RAM para eliminar latencia en la primera petición (Cold Start)
     print(f"[PyDective] Iniciando motor documental con modelo {settings.GEMINI_MODEL}...")
+    try:
+        from app.services.ocr_service import get_ocr_engine
+        get_ocr_engine()
+        print("[PyDective] Motor de OCR RapidOCR precargado exitosamente en RAM.")
+    except Exception as exc:
+        print(f"[PyDective] Advertencia precargando RapidOCR: {exc}")
     yield
     # Lifecycle shutdown
     print("[PyDective] Apagando servicios y cerrando conexiones...")
@@ -845,26 +851,6 @@ async def procesar_documento_stream(
             all_florence_raw = []
             markdown_pages_list = []
 
-            ocr_cache = {}
-            if motor_vision in ("rapidocr", "dual") and total_pages > 1:
-                scanned_indices = [
-                    idx for idx in range(total_pages)
-                    if len(doc[idx].get_text().strip()) == 0
-                ]
-                if len(scanned_indices) > 1:
-                    def _pre_extract_ocr_stream(idx):
-                        t0_sub = time.perf_counter()
-                        sub_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                        txt, bxs, vis = process_scanned_page_and_inject(sub_doc[idx])
-                        sub_doc.close()
-                        ms = (time.perf_counter() - t0_sub) * 1000
-                        return idx, txt, bxs, vis, ms
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                        results = list(pool.map(_pre_extract_ocr_stream, scanned_indices))
-                    ocr_cache = {idx: (txt, bxs, vis, ms) for idx, txt, bxs, vis, ms in results}
-
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
                 page = doc[p_idx]
@@ -894,19 +880,17 @@ async def procesar_documento_stream(
                 page_exito = True
                 page_error = None
                 page_gemini_ms = 0.0
+                ocr_ms = 0.0
 
                 # 1. Extracción con RapidOCR / Cero-IA
                 page_text = page.get_text()
 
                 if motor_vision in ("rapidocr", "dual"):
                     if classification.tipo == TipoPagina.NEEDS_AI and len(page_text.strip()) == 0:
-                        if p_idx in ocr_cache:
-                            ocr_full_text, ocr_boxes, ocr_visuals, ocr_ms = ocr_cache[p_idx]
-                        else:
-                            t_ocr0 = time.perf_counter()
-                            from app.services.image_ocr_extractor import process_scanned_page_and_inject
-                            ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
-                            ocr_ms = (time.perf_counter() - t_ocr0) * 1000
+                        t_ocr0 = time.perf_counter()
+                        from app.services.image_ocr_extractor import process_scanned_page_and_inject
+                        ocr_full_text, ocr_boxes, ocr_visuals = process_scanned_page_and_inject(page)
+                        ocr_ms = (time.perf_counter() - t_ocr0) * 1000
                         total_rapid_ms += ocr_ms
                         if ocr_full_text.strip():
                             page_text = ocr_full_text
@@ -969,9 +953,9 @@ async def procesar_documento_stream(
                         for h in gemini_res.hallazgos:
                             page_evidences.extend(h.evidencias)
 
-                page_dur = round(class_ms + prep_ms + page_gemini_ms + (f_page_ms if motor_vision == "florence2" else 0.0), 2)
+                page_dur = round(class_ms + prep_ms + page_gemini_ms + (ocr_ms if motor_vision in ("rapidocr", "dual") else 0.0) + (f_page_ms if motor_vision == "florence2" else 0.0), 2)
                 yield f"data: {json.dumps({'tipo': 'pagina', 'numero_pagina': p_num, 'carril': classification.tipo.value, 'exito': page_exito, 'error': page_error, 'duracion_ms': page_dur, 'paginas_completadas': p_num, 'total_paginas': total_pages, 'evidencias': [e.model_dump() for e in page_evidences], 'elementos_visuales': [v.model_dump() for v in page_visuals], 'gemini_ms': round(page_gemini_ms, 2)})}\n\n"
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.01)
 
                 resultados_por_pagina.append(
                     ResultadoPagina(

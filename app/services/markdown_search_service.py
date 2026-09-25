@@ -938,7 +938,8 @@ def _extract_dynamic_document_field(
         is_id_card_query = any(k in q_clean for k in ("cedula", "persona de la cedula", "la de la cedula", "nombre de la cedula", "nuip"))
         id_cards = []
         for p_num, content in pages_dict.items():
-            if re.search(r"(?i)\bc[eé]dula[\s\w]*de[\s\w]*ciudadan[ií]a\b", content):
+            if (re.search(r"(?i)\b[cg]edula[\s\w]*de[\s\w]*ciudadan[ií]a\b", content) or 
+                (re.search(r"(?i)\bciudadan[ií]a\b", content) and re.search(r"(?i)\bnuip\b", content))):
                 lines = content.splitlines()
                 nuip_val = ""
                 apellidos_val = ""

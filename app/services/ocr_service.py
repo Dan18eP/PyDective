@@ -64,6 +64,7 @@ def clean_ocr_line(line: str) -> str:
     cleaned = re.sub(r'(?i)\bteiefooo\b|\btelefooo\b', 'telefono', cleaned)
     cleaned = re.sub(r'(?i)\bidentificaceen\b', 'identificacion', cleaned)
     cleaned = re.sub(r'(?i)\bc[ií]lidaoania\b|\bciudaania\b|\bciuoadania\b', 'ciudadania', cleaned)
+    cleaned = re.sub(r'(?i)\bgedula\b', 'cedula', cleaned)
     # Separación de apellidos fusionados por artefactos de escaneo
     cleaned = re.sub(
         r'([A-Z]{3,})(OSPINA|MEJIA|ALVAREZ|HENAO|BOTERO|RIVERA|CASTILLO|LONDONO|TORRES|DUQUE)',

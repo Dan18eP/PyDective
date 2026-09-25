@@ -135,12 +135,23 @@ def get_or_create_page_indexed_markdown(
     if not pdf_bytes:
         return ""
 
-    # Extraer metadatos visuales si existen en L1
+    # Extraer metadatos visuales si existen en L1 o catalogarlos bajo demanda
     visuals_by_page: Dict[int, List[MetadatoImagen]] = {}
     if l1_entry and l1_entry.resultados_por_pagina:
         for res in l1_entry.resultados_por_pagina:
             if getattr(res, "metadatos_visuales", None):
                 visuals_by_page[res.numero_pagina] = res.metadatos_visuales
+    else:
+        try:
+            from app.services.image_service import catalog_page_images
+            temp_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+            for p_idx in range(len(temp_doc)):
+                vis = catalog_page_images(temp_doc[p_idx], catalogar_imagenes=True)
+                if vis:
+                    visuals_by_page[p_idx + 1] = vis
+            temp_doc.close()
+        except Exception as exc:
+            logger.debug(f"Error catalogando elementos visuales bajo demanda para markdown: {exc}")
 
     markdown_doc = generate_page_indexed_markdown(pdf_bytes, visuals_by_page, pdf_hash=pdf_hash)
 

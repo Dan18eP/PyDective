@@ -278,11 +278,15 @@ function handleStreamEvent(event) {
         appendTerminal(`> Hash SHA-256: ${event.pdf_hash}`);
         appendTerminal(`> Total páginas: ${event.total_paginas} | Motor: ${event.motor_vision || selectedVisionEngine}`);
     } else if (event.tipo === "progreso_motor") {
+        const motorLabel = (event.motor === "florence2") ? "Microsoft Florence-2 VLM" : "RapidOCR";
         if (event.estado === "analizando_vlm") {
-            if (statusText) statusText.textContent = `Pág ${event.numero_pagina}: Ejecutando inferencia multimodal Microsoft Florence-2 VLM en CPU...`;
-            appendTerminal(`> Pág ${event.numero_pagina}: Inferencia Florence-2 VLM en CPU iniciada...`);
+            if (statusText) statusText.textContent = `Pág ${event.numero_pagina}: Ejecutando inferencia multimodal ${motorLabel} en CPU...`;
+            appendTerminal(`> Pág ${event.numero_pagina}: Inferencia ${motorLabel} en CPU iniciada...`);
         } else if (event.estado === "completado") {
-            appendTerminal(`> Pág ${event.numero_pagina}: Florence-2 VLM completado en ${event.duracion_ms} ms`);
+            appendTerminal(`> Pág ${event.numero_pagina}: ${motorLabel} completado en ${event.duracion_ms} ms`);
+        } else if (typeof event.estado === "string") {
+            if (statusText) statusText.textContent = event.estado;
+            appendTerminal(`> ${motorLabel}: ${event.estado}`);
         }
     } else if (event.tipo === "pagina") {
         updatePageBlock(event.numero_pagina, event.carril);

@@ -171,6 +171,7 @@ def test_chat_visual_diagrama_barras_disambiguation():
     if not doc_path.exists():
         pytest.skip("documento_completo_20_paginas.pdf no encontrado en la raíz")
     h = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+    get_or_create_page_indexed_markdown(h)
     res = process_chat_query(h, "de que trata el diagrama de barras")
     assert res is not None
     assert res.citas == ["[Página 2]"]

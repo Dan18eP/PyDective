@@ -45,6 +45,9 @@ def is_page_scanned_image(page: pymupdf.Page) -> bool:
 def extract_page_ocr_cross_platform(
     page: pymupdf.Page,
     dpi: int = 150,
+    img_rgb: Optional[np.ndarray] = None,
+    scale_x: Optional[float] = None,
+    scale_y: Optional[float] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Ejecuta el OCR local multiplataforma sobre una página escaneada.
@@ -55,11 +58,11 @@ def extract_page_ocr_cross_platform(
     if page_rect.width <= 0 or page_rect.height <= 0:
         return "", []
 
-    pix = page.get_pixmap(dpi=dpi, alpha=False)
-    scale_x = pix.width / page_rect.width
-    scale_y = pix.height / page_rect.height
-
-    img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
+    if img_rgb is None or scale_x is None or scale_y is None:
+        pix = page.get_pixmap(dpi=dpi, alpha=False)
+        scale_x = pix.width / page_rect.width
+        scale_y = pix.height / page_rect.height
+        img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
 
     # 1. Detección ultrarrápida de página en blanco (dorsos vacíos como páginas 2 y 4)
     gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
@@ -78,18 +81,18 @@ def extract_page_ocr_cross_platform(
     # 3. Preprocesamiento Otsu (Binarización adaptativa ante bajo contraste o sombras de escaneo)
     img_rgb, otsu_applied = evaluate_contrast_and_otsu(img_rgb)
 
-    # 2. Motor Primario: RapidOCR (ONNX Runtime / DBNet + CRNN) para máxima precisión
+    # 4. Motor Primario: RapidOCR (ONNX Runtime / DBNet + CRNN) para máxima precisión
     try:
         from app.services.ocr_service import extract_page_ocr, is_ocr_available
         if is_ocr_available():
-            text, boxes = extract_page_ocr(page, dpi=max(dpi, 300), img_arr=img_rgb)
+            text, boxes = extract_page_ocr(page, dpi=dpi, img_arr=img_rgb)
             if text and len(text.strip()) > 10:
                 logger.info(f"[OCR] Página {page.number + 1} procesada exitosamente con RapidOCR: {len(boxes)} cajas de texto.")
                 return text, boxes
     except Exception as exc:
         logger.warning(f"Error o indisponibilidad en RapidOCR para página {page.number + 1}: {exc}")
 
-    # 3. Fallback: OCR nativo de Windows (Windows.Media.Ocr vía PowerShell)
+    # 5. Fallback: OCR nativo de Windows (Windows.Media.Ocr vía PowerShell)
     if sys.platform == "win32" and WIN_OCR_SCRIPT.exists():
         temp_img = None
         try:
@@ -175,11 +178,23 @@ def process_scanned_page_and_inject(
 ) -> Tuple[str, List[Dict[str, Any]], List[MetadatoImagen]]:
     """
     Procesa integralmente un folio escaneado:
-    1. Extrae el texto mediante OCR local multiplataforma.
+    1. Extrae el texto mediante OCR local multiplataforma reutilizando un único render de imagen.
     2. Inyecta la capa de texto invisible (render_mode=3) en el PDF en RAM.
-    3. Detecta y cataloga elementos visuales (firmas, sellos, códigos QR/barras).
+    3. Detecta y cataloga elementos visuales (firmas, sellos, códigos QR/barras) sin re-renderizar.
     """
-    full_text, boxes = extract_page_ocr_cross_platform(page, dpi=dpi)
+    page_rect = page.rect
+    pix = page.get_pixmap(dpi=dpi, alpha=False)
+    scale_x = pix.width / page_rect.width if page_rect.width > 0 else 1.0
+    scale_y = pix.height / page_rect.height if page_rect.height > 0 else 1.0
+    img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
+
+    full_text, boxes = extract_page_ocr_cross_platform(
+        page,
+        dpi=dpi,
+        img_rgb=img_rgb,
+        scale_x=scale_x,
+        scale_y=scale_y,
+    )
 
     if boxes:
         inject_ocr_text_layer(page, boxes)
@@ -194,23 +209,11 @@ def process_scanned_page_and_inject(
     except Exception as exc:
         logger.debug(f"Error segmentando firmas/sellos en página {page_num}: {exc}")
 
-    # Detectar códigos QR mediante OpenCV
+    # Detectar códigos QR mediante OpenCV reutilizando el array img_rgb ya renderizado
     try:
-        pix = page.get_pixmap(dpi=120)
-        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
-        if pix.n == 4:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGBA2BGR)
-        elif pix.n == 1:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_GRAY2BGR)
-        else:
-            img_arr = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
-
         qr_detector = cv2.QRCodeDetector()
-        data, points, _ = qr_detector.detectAndDecode(img_arr)
+        data, points, _ = qr_detector.detectAndDecode(img_rgb)
         if data and points is not None:
-            # Calcular bbox del código QR en puntos PDF
-            scale_x = pix.width / page.rect.width
-            scale_y = pix.height / page.rect.height
             pts = points[0]
             xs = [p[0] for p in pts]
             ys = [p[1] for p in pts]
@@ -228,6 +231,7 @@ def process_scanned_page_and_inject(
                     bbox=qr_bbox,
                     area_ratio=round(((qr_bbox[2]-qr_bbox[0])*(qr_bbox[3]-qr_bbox[1])) / (page.rect.width * page.rect.height), 4),
                     clasificacion_semantica="codigo_qr",
+                    contenido_decodificado=data,
                 )
             )
     except Exception as exc:

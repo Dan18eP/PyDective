@@ -124,14 +124,24 @@ class PydectivePdfViewer {
             this.totalPages = this.pdfDoc.numPages;
             if (this.pageTotalSpan) this.pageTotalSpan.innerText = this.totalPages;
             
+            // Pre-calcular escala ajustada al ancho del contenedor para renderizar una única vez a pantalla completa
+            if (this.container && this.totalPages > 0) {
+                try {
+                    const page1 = await this.pdfDoc.getPage(1);
+                    const containerWidth = this.container.clientWidth ? (this.container.clientWidth - 48) : 700;
+                    const pageWidthPts = page1.view[2] - page1.view[0];
+                    if (pageWidthPts > 0 && containerWidth > 100) {
+                        this.scale = containerWidth / pageWidthPts;
+                        if (this.zoomLevelSpan) this.zoomLevelSpan.innerText = `${Math.round(this.scale * 100)}%`;
+                    }
+                } catch (e) {
+                    console.warn('[PyDective Viewer] Error precalculando escala inicial:', e);
+                }
+            }
+
             this.container.innerHTML = '';
             await this.renderAllPages();
             this.updateCurrentPageUI(1);
-
-            // Ajustar al ancho del contenedor para máxima legibilidad
-            setTimeout(() => {
-                this.fitWidth();
-            }, 100);
         } catch (err) {
             console.error('[PyDective Viewer] Error cargando PDF:', err);
             this.container.innerHTML = `

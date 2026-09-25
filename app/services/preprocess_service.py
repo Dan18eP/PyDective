@@ -148,12 +148,17 @@ def evaluate_contrast_and_otsu(image_rgb: np.ndarray) -> Tuple[np.ndarray, bool]
     """
     Evalúa la varianza del histograma y aplica selectivamente binarización de Otsu
     si la imagen presenta bajo contraste, sombras o fondos degradados (US-06 Escenario 2).
+    No se aplica a páginas con contraste normal (papel blanco con texto oscuro) para preservar
+    el subpíxel antialiasing requerido por los modelos neuronales de OCR.
     """
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    min_val, max_val = float(np.min(gray)), float(np.max(gray))
     std_dev = float(np.std(gray))
+    contrast_range = max_val - min_val
 
-    # Si la desviación estándar es muy baja (< 40) o hay bajo contraste evidente
-    if std_dev < 42.0:
+    # Solo binarizar con Otsu ante bajo contraste genuino (fondos sombreados o gris-sobre-gris)
+    # y cuando no se trate de una página en blanco uniforme
+    if contrast_range < 80 or (std_dev < 15.0 and contrast_range < 120):
         _, binarized = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         binarized_rgb = cv2.cvtColor(binarized, cv2.COLOR_GRAY2RGB)
         return binarized_rgb, True

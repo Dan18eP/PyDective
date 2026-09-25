@@ -510,6 +510,7 @@ async def procesar_documento(
         total_rapid_ms = 0.0
         total_florence_ms = 0.0
         all_florence_raw = []
+        markdown_pages_list = []
 
         try:
             ai_queue = []
@@ -596,6 +597,17 @@ async def procesar_documento(
                     )
                 )
 
+                # Ensamblar Markdown indexado de la página inmediatamente en RAM
+                vis_notes = []
+                for v in page_visuals:
+                    desc = v.descripcion_visual or v.clasificacion_semantica or "elemento visual"
+                    if v.contenido_decodificado:
+                        desc += f" (datos: {v.contenido_decodificado})"
+                    vis_notes.append(f"[Elemento Visual: {desc} | Coordenadas: {v.bbox}]")
+                vis_block = "\n".join(vis_notes)
+                page_body = f"{page_text}\n\n{vis_block}" if (vis_block and page_text) else (page_text or vis_block)
+                markdown_pages_list.append(f"<!-- INICIO_PAGINA_{p_num} -->\n{page_body}\n<!-- FIN_PAGINA_{p_num} -->")
+
             # Inferencia multimodal concurrente con Gemini si hay elementos en cola
             if ai_queue:
                 loop = asyncio.get_running_loop()
@@ -632,7 +644,7 @@ async def procesar_documento(
                                 page_res.evidencias.extend(h.evidencias)
         finally:
             try:
-                save_uploaded_pdf(pdf_hash, doc.tobytes())
+                save_uploaded_pdf(pdf_hash, doc.tobytes(), overwrite=True)
             except Exception as exc:
                 logger.debug(f"No se pudo guardar PDF enriquecido en RAM: {exc}")
             doc.close()
@@ -716,6 +728,8 @@ async def procesar_documento(
                 merged_assoc[h.parametro] = h.evidencias
             merged_previos[h.parametro] = h
 
+        full_indexed_markdown = "\n\n".join(markdown_pages_list)
+
         l1_entry = L1DocumentEntry(
             pdf_hash=pdf_hash,
             pipeline_version="2.2",
@@ -727,6 +741,7 @@ async def procesar_documento(
             indice_asociativo=merged_assoc,
             hallazgos_previos=list(merged_previos.values()),
             telemetria_original=output.telemetria,
+            documento_markdown_indexado=full_indexed_markdown,
         )
         set_l1_cache(pdf_hash, l1_entry)
 
@@ -805,6 +820,7 @@ async def procesar_documento_stream(
             total_rapid_ms = 0.0
             total_florence_ms = 0.0
             all_florence_raw = []
+            markdown_pages_list = []
 
             for p_idx in range(total_pages):
                 p_num = p_idx + 1
@@ -924,6 +940,17 @@ async def procesar_documento_stream(
                     )
                 )
 
+                # Ensamblar Markdown indexado de la página inmediatamente en RAM
+                vis_notes = []
+                for v in page_visuals:
+                    desc = v.descripcion_visual or v.clasificacion_semantica or "elemento visual"
+                    if v.contenido_decodificado:
+                        desc += f" (datos: {v.contenido_decodificado})"
+                    vis_notes.append(f"[Elemento Visual: {desc} | Coordenadas: {v.bbox}]")
+                vis_block = "\n".join(vis_notes)
+                page_body = f"{page_text}\n\n{vis_block}" if (vis_block and page_text) else (page_text or vis_block)
+                markdown_pages_list.append(f"<!-- INICIO_PAGINA_{p_num} -->\n{page_body}\n<!-- FIN_PAGINA_{p_num} -->")
+
             # Consolidar hallazgos de todas las páginas aplicando precedencia absoluta nativa (US-10)
             consolidated_all = consolidate_findings(all_spatial_findings, all_ai_findings)
             findings_by_param = {}
@@ -1006,6 +1033,8 @@ async def procesar_documento_stream(
                     merged_assoc[h.parametro] = h.evidencias
                 merged_previos[h.parametro] = h
 
+            full_indexed_markdown = "\n\n".join(markdown_pages_list)
+
             l1_entry = L1DocumentEntry(
                 pdf_hash=pdf_hash,
                 pipeline_version="2.2",
@@ -1017,6 +1046,7 @@ async def procesar_documento_stream(
                 indice_asociativo=merged_assoc,
                 hallazgos_previos=list(merged_previos.values()),
                 telemetria_original=output.telemetria,
+                documento_markdown_indexado=full_indexed_markdown,
             )
             set_l1_cache(pdf_hash, l1_entry)
 
@@ -1029,7 +1059,7 @@ async def procesar_documento_stream(
             yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': output.status.value, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'paginas_pendientes': output.paginas_pendientes, 'hallazgos': [h.model_dump() for h in final_hallazgos], 'motor_seleccionado': motor_vision, 'comparativa_motores': comparativa_motores})}\n\n"
         finally:
             try:
-                save_uploaded_pdf(pdf_hash, doc.tobytes())
+                save_uploaded_pdf(pdf_hash, doc.tobytes(), overwrite=True)
             except Exception as exc:
                 logger.debug(f"No se pudo guardar PDF enriquecido en RAM: {exc}")
             doc.close()

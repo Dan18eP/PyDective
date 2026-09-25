@@ -82,20 +82,6 @@ def search_exact_pdf_occurrences(pdf_hash: str, query: str) -> Dict[str, Any]:
         }
 
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-    
-    # Si el documento es un escaneo sin texto nativo, asegurar que la capa de texto OCR esté indexada
-    has_text = any(len(doc[p].get_text().strip()) > 0 for p in range(min(3, len(doc))))
-    if not has_text:
-        try:
-            from app.services.markdown_service import get_or_create_page_indexed_markdown
-            get_or_create_page_indexed_markdown(pdf_hash)
-            # Recargar bytes enriquecidos con la capa invisible de texto inyectada
-            enriched_bytes = get_pdf_bytes_by_hash(pdf_hash)
-            if enriched_bytes:
-                doc.close()
-                doc = pymupdf.open(stream=enriched_bytes, filetype="pdf")
-        except Exception as exc:
-            pass
 
     import unicodedata
     def _strip_acc(s: str) -> str:

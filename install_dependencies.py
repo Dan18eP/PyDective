@@ -175,11 +175,12 @@ def verify_vision_engines():
     # 1. Comprobar RapidOCR
     check_rapid_cmd = runner + [
         "-c",
-        "from app.services.ocr_service import get_ocr_engine; engine = get_ocr_engine(); print('RAPIDOCR_READY' if engine else 'RAPIDOCR_NONE')",
+        "from app.services.ocr_service import get_ocr_engine, get_ocr_provider_name; engine = get_ocr_engine(); print(f'RAPIDOCR_READY:{get_ocr_provider_name()}' if engine else 'RAPIDOCR_NONE')",
     ]
     res_rapid = subprocess.run(check_rapid_cmd, capture_output=True, text=True, cwd=str(ROOT_DIR))
     if "RAPIDOCR_READY" in res_rapid.stdout:
-        print_ok("Motor RapidOCR ONNX: Listo (Aceleracion C++/AVX2 en CPU)")
+        provider = res_rapid.stdout.split("RAPIDOCR_READY:")[1].strip() if "RAPIDOCR_READY:" in res_rapid.stdout else "Listo"
+        print_ok(f"Motor RapidOCR ONNX: Listo ({provider})")
     else:
         print_warn(f"Motor RapidOCR ONNX: Advertencia ({res_rapid.stderr.strip()[:80]})")
 

@@ -113,3 +113,32 @@ def test_inject_ocr_text_layer_and_name_extraction():
 
     doc.close()
 
+
+def test_ocr_directml_and_graceful_cpu_fallback(monkeypatch):
+    """
+    Verifica que el motor opera con aceleración DirectML (GPU) si está presente,
+    y que ante la ausencia de GPU o DirectML conmuta transparentemente a CPUExecutionProvider
+    sin generar excepciones ni fallas de extracción.
+    """
+    from app.services import ocr_service
+
+    # 1. Verificar proveedor activo
+    provider_name = ocr_service.get_ocr_provider_name()
+    assert provider_name in ("DirectML (GPU DirectX 12)", "CPUExecutionProvider (AVX2)")
+
+    # 2. Forzar motor CPU de respaldo explícito
+    cpu_engine = ocr_service.get_ocr_engine(force_cpu=True)
+    assert cpu_engine is not None
+    assert "CPUExecutionProvider" in cpu_engine.text_det.infer.session.get_providers()
+
+    # 3. Simular entorno sin GPU (DirectML no disponible)
+    monkeypatch.setattr(ocr_service, "is_directml_available", lambda: False)
+    monkeypatch.setattr(ocr_service, "_OCR_INITIALIZED", False)
+    monkeypatch.setattr(ocr_service, "_OCR_ENGINE", None)
+
+    fallback_engine = ocr_service.get_ocr_engine()
+    assert fallback_engine is not None
+    assert ocr_service.get_ocr_provider_name() == "CPUExecutionProvider (AVX2)"
+    assert "CPUExecutionProvider" in fallback_engine.text_det.infer.session.get_providers()
+
+

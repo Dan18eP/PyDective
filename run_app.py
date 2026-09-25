@@ -185,10 +185,11 @@ def check_vision_engines():
 
     # 1. RapidOCR ONNX
     try:
-        from app.services.ocr_service import get_ocr_engine
+        from app.services.ocr_service import get_ocr_engine, get_ocr_provider_name
         engine = get_ocr_engine()
         if engine:
-            print("  [ONLINE]  RapidOCR ONNX:       Listo (Aceleracion C++/AVX2 ~120ms)")
+            provider = get_ocr_provider_name()
+            print(f"  [ONLINE]  RapidOCR ONNX:       Listo ({provider})")
         else:
             print("  [AVISO]   RapidOCR ONNX:       No inicializado")
     except Exception as exc:
@@ -204,13 +205,19 @@ def check_vision_engines():
 
 
 def show_banner(host: str, port: int, provider_desc: str):
+    try:
+        from app.services.ocr_service import get_ocr_provider_name
+        ocr_desc = f"RapidOCR ONNX ({get_ocr_provider_name()})"
+    except Exception:
+        ocr_desc = "RapidOCR ONNX (C++/AVX2)"
+
     print("\n" + "=" * 70)
     print("               PyDective - Motor Forense Documental               ")
     print("=" * 70)
     print(f"  * Servidor API:        http://{host}:{port}")
     print(f"  * Interfaz Web:        http://{host}:{port}/")
     print(f"  * Documentacion API:   http://{host}:{port}/docs")
-    print(f"  * Motor OCR:           RapidOCR ONNX (C++/AVX2 ~120 ms)")
+    print(f"  * Motor OCR:           {ocr_desc}")
     print(f"  * Motor VLM:           Microsoft Florence-2 (230M en CPU)")
     print(f"  * Proveedor Chat/LLM:  {provider_desc}")
     print(f"  * Modos Disponibles:   RapidOCR | Florence-2 | Benchmark Dual (A/B)")

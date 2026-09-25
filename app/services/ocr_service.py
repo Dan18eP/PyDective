@@ -14,28 +14,90 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _OCR_ENGINE = None
+_CPU_FALLBACK_ENGINE = None
 _OCR_INITIALIZED = False
+_OCR_PROVIDER_NAME = "CPU"
 
 
-def get_ocr_engine():
-    """Retorna la instancia singleton del motor RapidOCR o None si no está disponible."""
-    global _OCR_ENGINE, _OCR_INITIALIZED
+def is_directml_available() -> bool:
+    """Retorna True si el proveedor DirectML (GPU DirectX 12) está disponible en el entorno."""
+    try:
+        import onnxruntime as ort
+        return "DmlExecutionProvider" in ort.get_available_providers()
+    except Exception:
+        return False
+
+
+def get_ocr_engine(force_cpu: bool = False):
+    """
+    Retorna la instancia singleton del motor RapidOCR o None si no está disponible.
+    Prioriza aceleración DirectML por hardware (GPU AMD/Intel/NVIDIA vía DirectX 12)
+    con fallback transparente y automático a CPU si no hay GPU disponible o si DirectML falla.
+    """
+    global _OCR_ENGINE, _CPU_FALLBACK_ENGINE, _OCR_INITIALIZED, _OCR_PROVIDER_NAME
+
+    if force_cpu:
+        if _CPU_FALLBACK_ENGINE is None:
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                _CPU_FALLBACK_ENGINE = RapidOCR(
+                    intra_op_num_threads=6,
+                    use_cls=False,
+                    det_limit_side_len=720,
+                    det_limit_type="max",
+                    rec_batch_num=16,
+                )
+                logger.info("Motor RapidOCR (modo CPU) inicializado como respaldo.")
+            except Exception as exc:
+                logger.warning("Fallo al inicializar motor CPU de respaldo: %s", exc)
+                _CPU_FALLBACK_ENGINE = None
+        return _CPU_FALLBACK_ENGINE
+
     if not _OCR_INITIALIZED:
         try:
             from rapidocr_onnxruntime import RapidOCR
-            _OCR_ENGINE = RapidOCR(
+            ocr_params = dict(
                 intra_op_num_threads=6,
                 use_cls=False,
                 det_limit_side_len=720,
                 det_limit_type="max",
                 rec_batch_num=16,
             )
-            logger.info("Motor RapidOCR optimizado (6 hilos CPU, batch=16, use_cls=False, Det max=720) inicializado.")
+
+            # Detectar si DirectML (GPU DirectX 12) está disponible en el entorno
+            if is_directml_available():
+                try:
+                    _OCR_ENGINE = RapidOCR(
+                        det_use_dml=True,
+                        rec_use_dml=True,
+                        **ocr_params,
+                    )
+                    _OCR_PROVIDER_NAME = "DirectML (GPU DirectX 12)"
+                    logger.info("Motor RapidOCR acelerado con DirectML (GPU DirectX 12) inicializado exitosamente.")
+                except Exception as dml_exc:
+                    logger.warning(
+                        "Fallo al inicializar RapidOCR con DirectML (%s). Recurriendo automáticamente a CPU.",
+                        dml_exc,
+                    )
+                    _OCR_ENGINE = RapidOCR(**ocr_params)
+                    _OCR_PROVIDER_NAME = "CPUExecutionProvider (AVX2)"
+                    logger.info("Motor RapidOCR en CPU inicializado como fallback.")
+            else:
+                _OCR_ENGINE = RapidOCR(**ocr_params)
+                _OCR_PROVIDER_NAME = "CPUExecutionProvider (AVX2)"
+                logger.info("Motor RapidOCR en CPU inicializado (DirectML no disponible en el sistema).")
         except Exception as exc:
             logger.warning("RapidOCR no disponible en el entorno local: %s", exc)
             _OCR_ENGINE = None
+            _OCR_PROVIDER_NAME = "None"
         _OCR_INITIALIZED = True
     return _OCR_ENGINE
+
+
+def get_ocr_provider_name() -> str:
+    """Retorna el nombre descriptivo del proveedor de ejecución activo (DirectML o CPU)."""
+    get_ocr_engine()
+    return _OCR_PROVIDER_NAME
 
 
 def is_ocr_available() -> bool:
@@ -110,9 +172,26 @@ def extract_page_ocr(
 
         scale_x = img_prep.shape[1] / page_rect.width
         scale_y = img_prep.shape[0] / page_rect.height
-        ocr_results, _ = engine(img_prep)
+        try:
+            ocr_results, _ = engine(img_prep)
+        except Exception as exc:
+            if "DirectML" in _OCR_PROVIDER_NAME:
+                logger.warning(
+                    "Fallo en inferencia DirectML en página %s (%s). Reintentando con CPUExecutionProvider...",
+                    page.number + 1,
+                    exc,
+                )
+                cpu_eng = get_ocr_engine(force_cpu=True)
+                if cpu_eng:
+                    ocr_results, _ = cpu_eng(img_prep)
+                else:
+                    logger.error("Error ejecutando inferencia OCR en página %s: %s", page.number + 1, exc)
+                    return "", []
+            else:
+                logger.error("Error ejecutando inferencia OCR en página %s: %s", page.number + 1, exc)
+                return "", []
     except Exception as exc:
-        logger.error("Error ejecutando inferencia OCR en página %s: %s", page.number + 1, exc)
+        logger.error("Error general en pipeline OCR de página %s: %s", page.number + 1, exc)
         return "", []
 
     if not ocr_results:

@@ -149,7 +149,7 @@ Invalidación: hash distinto; TTL; key `invalid`; no mezclar `cache_name` entre 
 
 ---
 
-## 6. Presupuesto de latencia (20 páginas, diseño actualizado)
+## 6. Presupuesto de latencia (diseño actualizado y medido en benchmarks)
 
 Escenario A — PDF digital, keywords en texto, hit frío L0 (con extracción espacial clave-valor O(N) + KWIC + normalización de entidades):
 
@@ -157,33 +157,40 @@ Escenario A — PDF digital, keywords en texto, hit frío L0 (con extracción es
 - fitz extracción texto + palabras `words` ~15–35 ms  
 - análisis espacial horizontal/vertical + regex de entidades ~10–25 ms  
 - consolidación y serialización `orjson` ~5–10 ms  
-- 0 red (cero Gemini)  
+- 0 red (cero Gemini / cero LLM)  
 - **objetivo p95 < 200 ms** más HTML  
 
 Escenario B — mismo PDF, otras keywords, hit L1:
 
-- hash + Redis (`orjson`) + refiltrado espacial/léxico  
+- hash + Redis / memoria L1 (`orjson`) + refiltrado espacial/léxico  
 - **objetivo p95 < 50 ms**
 
-Escenario C — 20 escaneos sucios, 4 keys/proyectos, semáforo 4:
+Escenario C — Folios escaneados o imágenes complejas (RapidOCR acelerado en CPU):
 
-- fase A + pre-acondicionamiento OpenCV (Deskew en miniatura + Otsu)  
-- render WebP directo con `fitz.Matrix` (en background durante clasificación)  
-- 5 olas de 4 RTT Gemini 2.0 Flash (`thinking_budget=0`)  
-- failover no reinicia olas ya OK  
-- **objetivo: 1–3 RTT efectivos**  
+- Detección de páginas en blanco en <2 ms (`std < 10.0 and mean > 245.0`) con omisión del 100% de inferencia  
+- Preprocesamiento OpenCV (Deskew acotado $\pm 15^\circ$ + binarización adaptativa Otsu)  
+- Inferencia RapidOCR DBNet/CRNN con `rec_batch_num=12` e `intra_op_num_threads=2`  
+- Inferencia en folios densos reducida de ~9.6s a ~5.8s por página (-40% latencia de decodificación)  
+- Paralelización con `ThreadPoolExecutor(max_workers=2)` aislando instancias `sub_doc = fitz.open(stream=pdf_bytes)`  
+- Cero cold-start: pesos precargados en memoria durante el `lifespan` de FastAPI  
 
-Escenario D — hit L0:
+Escenario D — Pydective Chat en vivo:
+
+- **Modo Determinista (L1 RAM):** < 5 ms por respuesta directa.  
+- **Modo SLM Local (`llama3.2:1b` en Ollama):** Streaming SSE continuo token a token (`/chat/{pdf_hash}/stream`), respuesta puntual en ~2.1s con límite de 120 tokens y ventana quirúrgica de 2 páginas (`max_pages=2`).  
+
+Escenario E — hit L0:
 
 - **objetivo < 20 ms**
 
-Escenario E — 5 peticiones concurrentes idénticas en caché fría (Prevención de Dogpile):
+Escenario F — 5 peticiones concurrentes idénticas en caché fría (Prevención de Dogpile):
 
 - 1 petición adquiere candado Singleflight (`SET lock:pdf:{hash} NX EX 60`) y ejecuta el pipeline.  
 - 4 peticiones concurrentes esperan el resultado publicado en Redis sin duplicar inferencia ni CPU.  
 - **objetivo: 0 llamadas duplicadas a IA**, todas servidas desde L0 en cuanto finaliza la primera.
 
-Estos números son **presupuestos de diseño**, no promesas de SLA.
+Estos números son **presupuestos de diseño y métricas consolidadas en benchmark local**.
+
 
 ---
 

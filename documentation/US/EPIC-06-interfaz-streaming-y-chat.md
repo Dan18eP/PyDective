@@ -102,3 +102,52 @@
    - **Dado** una petición de chat para un `pdf_hash` no existente o expirado en L1,
    - **Cuando** el endpoint recibe la llamada,
    - **Entonces** responde HTTP 404 con error estructurado `DOCUMENT_NOT_FOUND_OR_EXPIRED`, solicitando recargar el PDF para iniciar una nueva sesión.
+
+---
+
+### US-24: Interruptor de Modelo Local y Streaming SSE en Chat con Latencia Ultrabaja
+
+- **ID:** `US-24`
+- **Requisitos asociados:** `RF-095`, `RF-108`, `ADR-008`
+- **Prioridad:** Alta | **Estimación:** 5 pts
+
+#### Narrativa
+**Como** usuario que interactúa con el visor de resultados,  
+**Quiero** un switch deslizable para alternar entre el motor determinista en RAM L1 y el modelo local (`llama3.2:1b`),  
+**Para** obtener respuestas instantáneas (<5 ms) a datos clave o razonamiento contextual transmitido token por token vía SSE (`POST /chat/{pdf_hash}/stream`) sin verbosidad innecesaria.
+
+#### Criterios de Aceptación (Gherkin)
+1. **Escenario: Alternancia fluida y persistencia de estado**
+   - **Dado** el visor de resultados con el switch `#chat-toggle-local-model`,
+   - **Cuando** el usuario activa o desactiva la casilla,
+   - **Entonces** el estado se guarda en `localStorage` y la etiqueta visual conmuta entre `Modo Modelo Local (llama3.2:1b)` y `Modo Determinista (RAM L1)`.
+
+2. **Escenario: Streaming token por token vía SSE**
+   - **Dado** el switch activo en modo local,
+   - **Cuando** el usuario envía una pregunta como *"¿Quién es el cliente?"*,
+   - **Entonces** la solicitud se envía a `/chat/{pdf_hash}/stream`, recibiendo tokens SSE continuos hasta completar la respuesta en ~2.1s con límite de 120 tokens y respuesta directa sin preámbulos.
+
+---
+
+### US-25: Redimensionador de Visor Split-View (Resizer) y Zoom Bidireccional Estable
+
+- **ID:** `US-25`
+- **Requisitos asociados:** `RF-075`, `RF-076`, `ADR-008`
+- **Prioridad:** Media | **Estimación:** 3 pts
+
+#### Narrativa
+**Como** analista forense,  
+**Quiero** ajustar manualmente el divisor entre el visor de documentos y la consola de resultados mediante arrastre de cursor,  
+**Para** maximizar la lectura visual del documento en pantallas de diferentes tamaños sin romper el diseño al aplicar zoom.
+
+#### Criterios de Aceptación (Gherkin)
+1. **Escenario: Arrastre interactivo y contención de proporciones**
+   - **Dado** el divisor `#drag-handle` en la vista Split-View,
+   - **Cuando** el usuario arrastra el cursor horizontalmente,
+   - **Entonces** el ancho del panel izquierdo se actualiza en tiempo real manteniéndose dentro de los límites seguros (28% a 82%) y se almacena en `localStorage`.
+
+2. **Escenario: Restablecimiento rápido y zoom estable**
+   - **Dado** una proporción modificada,
+   - **Cuando** el usuario hace doble clic sobre el divisor,
+   - **Entonces** se restaura el valor por defecto (58%). Al aplicar zoom elevado en el visor, el canvas permite desplazamiento horizontal y vertical dentro de su contenedor sin desbordar la ventana global.
+

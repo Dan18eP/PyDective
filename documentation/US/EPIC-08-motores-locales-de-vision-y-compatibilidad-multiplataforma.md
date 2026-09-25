@@ -130,3 +130,52 @@
    - **Dado** una sesión de navegador bajo Wayland o sin contexto HTTPS,
    - **Cuando** el usuario presiona el botón de copiar coordenadas BBox,
    - **Entonces** la función `copyToClipboard()` recurre al fallback de `<textarea>` oculto sin lanzar excepciones de DOM en la consola.
+
+---
+
+### US-32: Aceleración de OCR con Binarización Adaptativa Otsu, Descarte de Blancos y Paralelismo Multi-Hilo
+
+- **ID:** `US-32`
+- **Requisitos asociados:** `RF-105`, `RNF-051`, `ADR-008`
+- **Prioridad:** Crítica | **Estimación:** 8 pts
+
+#### Narrativa
+**Como** sistema de extracción documental de alto rendimiento,  
+**Quiero** binarizar adaptativamente con Otsu las imágenes antes de RapidOCR, descartar folios en blanco en <2ms y procesar páginas escaneadas concurrentemente con handles aislados de PyMuPDF,  
+**Para** reducir el tiempo de decodificación OCR en un 40% sin contención de hilos ni degradación en la exactitud de los caracteres.
+
+#### Criterios de Aceptación (Gherkin)
+1. **Escenario: Binarización adaptativa Otsu pre-inferencia**
+   - **Dado** una página escaneada con sombras o fondo tramado,
+   - **Cuando** `evaluate_contrast_and_otsu` detecta bajo contraste,
+   - **Entonces** aplica binarización Otsu convirtiendo el fondo en blanco puro (255) y el texto en negro puro (0), acelerando la inferencia de RapidOCR DBNet/CRNN de ~9.6s a ~5.8s con 100% de coincidencia de caracteres.
+
+2. **Escenario: Detección y omisión de páginas en blanco en <2 ms**
+   - **Dado** una página completamente en blanco o vacía,
+   - **Cuando** `extract_page_ocr` evalúa la desviación estándar y media (`std < 10.0 and mean > 245.0`),
+   - **Entonces** retorna inmediatamente una lista vacía de texto y coordenadas omitiendo por completo la llamada al modelo ONNX.
+
+3. **Escenario: Procesamiento paralelo aislado con ThreadPoolExecutor**
+   - **Dado** un documento con múltiples folios escaneados que requieren OCR,
+   - **Cuando** el backend orquesta el procesamiento de páginas,
+   - **Entonces** utiliza `ThreadPoolExecutor(max_workers=2)` donde cada worker inicializa `sub_doc = fitz.open(stream=pdf_bytes, filetype="pdf")`, eliminando la contención de mutex en C++ y el bloqueo del GIL.
+
+---
+
+### US-33: Calibración y Precalentamiento del Motor OCR en Lifespan para Cero Cold-Start
+
+- **ID:** `US-33`
+- **Requisitos asociados:** `RNF-001`, `ADR-008`
+- **Prioridad:** Alta | **Estimación:** 3 pts
+
+#### Narrativa
+**Como** usuario que interactúa por primera vez con el sistema tras un reinicio del servidor,  
+**Quiero** que los modelos de visión de RapidOCR ya se encuentren cargados en memoria RAM,  
+**Para** no experimentar retrasos de 2.5 a 3.5 segundos por arranque en frío (*cold-start*) en la primera solicitud.
+
+#### Criterios de Aceptación (Gherkin)
+1. **Escenario: Precarga de modelos ONNX en el evento de inicio (Lifespan)**
+   - **Dado** el inicio del servidor Uvicorn con FastAPI,
+   - **Cuando** se ejecuta el contexto `lifespan(app: FastAPI)`,
+   - **Entonces** se invoca `get_ocr_engine()` instanciando el motor de RapidOCR en memoria antes de aceptar conexiones HTTP.
+

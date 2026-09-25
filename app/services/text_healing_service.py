@@ -74,21 +74,42 @@ GENERIC_OCR_REPAIR_MAP: List[Tuple[re.Pattern, str]] = [
     # 2. Des-pegado genérico de etiquetas de campo unidas a su valor (ej: "Telefono.301..." -> "Telefono: 301...")
     (
         re.compile(
-            r"(?i)\b(telefono|tel|celular|cel|nit|cc|nuip|sucursal|formula|cant|cantidad|posologia|direccion|domicilio|medico|doctor|paciente|usuario|cliente|diagnostico|aseguradora|contrato|modalidad|regimen)[.:]+([a-záéíóú0-9])"
+            r"(?i)\b(facha|fecha|fechade|telefono|tel|celular|cel|nit|cc|nuip|sucursal|formula|cant|cantidad|posologia|direccion|domicilio|medico|doctor|paciente|usuario|cliente|diagnostico|aseguradora|contrato|modalidad|regimen|identificacion|totals?)[.:/]+([a-záéíóú0-9])"
         ),
         r"\g<1>: \g<2>",
     ),
 
-    # 3. Separación de letras pegadas a números y números pegados a letras (ej: "NUIP32.848.952" -> "NUIP 32.848.952")
+    # 3. Separación de fechas pegadas a horas (ej: "21/05/202608:28" -> "21/05/2026 08:28")
+    (re.compile(r"(\d{1,2}/\d{1,2}/\d{4})(\d{2}:\d{2})"), r"\g<1> \g<2>"),
+
+    # 4. Separación de letras pegadas a números y números pegados a letras
     (re.compile(r"([a-zA-ZáéíóúÁÉÍÓÚ]{3,})(\d+)"), r"\g<1> \g<2>"),
     (re.compile(r"(\d+)([a-zA-ZáéíóúÁÉÍÓÚ]{3,})"), r"\g<1> \g<2>"),
 ]
 
 
+# Vocabulario canónico de encabezados y palabras clave administrativas para corrección con Levenshtein en C
+ADMIN_CANONICAL_TARGETS = {
+    "fecha": ("facha", "feha", "feche"),
+    "entrega": ("enttcega", "entega"),
+    "atencion": ("atencin", "atenclon"),
+    "impresion": ("impresin", "mpresion", "lmpresion"),
+    "identificacion": ("identificaceen", "fdentificacion", "ldentiflcaclon", "identiflcaclon", "ldentificacion", "jontificacion"),
+    "cedula": ("cedla", "cedul", "ceoulalde"),
+    "telefono": ("teiefooo", "telefooo", "telfono"),
+    "usuario": ("usuarlo", "usuari", "usuaro"),
+    "paciente": ("paclente", "paciene"),
+    "cliente": ("cllente", "clinte"),
+    "total": ("totals", "tota"),
+    "subtotal": ("subtotals", "subtota"),
+    "nombre": ("ndmbre", "nombr"),
+}
+
+
 def heal_scanned_text(text: str) -> str:
     """
     Sanea texto extraído de documentos escaneados aplicando correcciones ortográficas,
-    des-corrupción de glifos en español y normalización de términos médicos/notariales.
+    des-corrupción de glifos en español, separación de tokens y alineación ultra-rápida (Levenshtein en C).
     """
     if not text:
         return ""
@@ -106,7 +127,37 @@ def heal_scanned_text(text: str) -> str:
     # 3. Limpieza de caracteres de reemplazo unicode residuales
     cleaned = cleaned.replace("\ufffd", "").replace("", "")
     
-    # 4. Normalizar espacios múltiples preservando saltos de línea
+    # 4. Alineación difusa ultra-rápida con Levenshtein en C para encabezados de negocio
+    try:
+        import Levenshtein
+        tokens = cleaned.split(" ")
+        repaired_tokens = []
+        for tok in tokens:
+            tok_clean = tok.strip(":,.-_").lower()
+            if len(tok_clean) >= 4:
+                best_match = None
+                for target, aliases in ADMIN_CANONICAL_TARGETS.items():
+                    if tok_clean in aliases or Levenshtein.distance(tok_clean, target) <= (1 if len(target) <= 5 else 2):
+                        best_match = target
+                        break
+                if best_match:
+                    # Preservar puntuación original si la tenía (ej. ":" al final)
+                    suffix = ":" if tok.endswith(":") else ("." if tok.endswith(".") else "")
+                    prefix = tok[:len(tok) - len(tok.lstrip(":,.-_"))]
+                    if tok.isupper():
+                        repaired_tokens.append(f"{prefix}{best_match.upper()}{suffix}")
+                    elif tok[0].isupper():
+                        repaired_tokens.append(f"{prefix}{best_match.capitalize()}{suffix}")
+                    else:
+                        repaired_tokens.append(f"{prefix}{best_match}{suffix}")
+                    continue
+            repaired_tokens.append(tok)
+        cleaned = " ".join(repaired_tokens)
+    except Exception:
+        pass
+
+    # 5. Normalizar espacios múltiples preservando saltos de línea
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     
     return cleaned.strip()
+

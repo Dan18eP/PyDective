@@ -513,6 +513,136 @@ class PydectivePdfViewer {
 // Inicialización global accesible para templates y chat
 window.PydectivePdfViewer = PydectivePdfViewer;
 
+/**
+ * Inicializador del divisor interactivo (Split Resizer)
+ * Permite arrastrar con el cursor para ensanchar o reducir el visor de PDF
+ * con límites ergonómicos [28%, 82%], doble-clic para reiniciar a 58%,
+ * y persistencia en localStorage.
+ */
+function initPdfSplitResizer() {
+    const resizer = document.getElementById('pdf-split-resizer');
+    const leftPane = document.getElementById('pdf-viewer-pane');
+    const container = document.querySelector('.pydective-split-layout');
+    if (!resizer || !leftPane || !container) return;
+
+    // Restaurar ancho guardado o usar 58% predeterminado (más amplio)
+    const savedPct = localStorage.getItem('pydective_viewer_split_pct');
+    if (savedPct) {
+        const val = parseFloat(savedPct);
+        if (!isNaN(val) && val >= 28 && val <= 82) {
+            leftPane.style.width = `${val}%`;
+        }
+    } else {
+        leftPane.style.width = '58%';
+    }
+
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const startDrag = (clientX) => {
+        isDragging = true;
+        startX = clientX;
+        startWidth = leftPane.getBoundingClientRect().width;
+        resizer.classList.add('is-resizing');
+        document.body.classList.add('pydective-resizing');
+    };
+
+    const doDrag = (clientX) => {
+        if (!isDragging) return;
+        const containerRect = container.getBoundingClientRect();
+        if (containerRect.width <= 0) return;
+
+        const currentX = clientX;
+        const newWidthPx = startWidth + (currentX - startX);
+        let newPct = (newWidthPx / containerRect.width) * 100;
+
+        // Limitar entre 28% y 82% para asegurar usabilidad de ambas columnas
+        newPct = Math.max(28, Math.min(82, newPct));
+        leftPane.style.width = `${newPct.toFixed(2)}%`;
+        localStorage.setItem('pydective_viewer_split_pct', newPct.toFixed(2));
+    };
+
+    const stopDrag = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        resizer.classList.remove('is-resizing');
+        document.body.classList.remove('pydective-resizing');
+
+        // Notificar al visor para redibujo o ajuste responsivo
+        window.dispatchEvent(new Event('resize'));
+    };
+
+    // Eventos de ratón
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startDrag(e.clientX);
+
+        const onMouseMove = (ev) => doDrag(ev.clientX);
+        const onMouseUp = () => {
+            stopDrag();
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Eventos táctiles para tablets / pantallas táctiles
+    resizer.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length > 0) {
+            startDrag(e.touches[0].clientX);
+            const onTouchMove = (ev) => {
+                if (ev.touches && ev.touches.length > 0) {
+                    doDrag(ev.touches[0].clientX);
+                }
+            };
+            const onTouchEnd = () => {
+                stopDrag();
+                window.removeEventListener('touchmove', onTouchMove);
+                window.removeEventListener('touchend', onTouchEnd);
+            };
+            window.addEventListener('touchmove', onTouchMove, { passive: true });
+            window.addEventListener('touchend', onTouchEnd);
+        }
+    });
+
+    // Doble clic para restablecer al 58% predeterminado
+    resizer.addEventListener('dblclick', () => {
+        leftPane.style.width = '58%';
+        localStorage.setItem('pydective_viewer_split_pct', '58.00');
+        window.dispatchEvent(new Event('resize'));
+    });
+
+    // Accesibilidad por teclado: Flecha izquierda / derecha
+    resizer.addEventListener('keydown', (e) => {
+        const containerRect = container.getBoundingClientRect();
+        if (containerRect.width <= 0) return;
+        const currentPct = (leftPane.getBoundingClientRect().width / containerRect.width) * 100;
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const newPct = Math.max(28, currentPct - 3);
+            leftPane.style.width = `${newPct.toFixed(2)}%`;
+            localStorage.setItem('pydective_viewer_split_pct', newPct.toFixed(2));
+            window.dispatchEvent(new Event('resize'));
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            const newPct = Math.min(82, currentPct + 3);
+            leftPane.style.width = `${newPct.toFixed(2)}%`;
+            localStorage.setItem('pydective_viewer_split_pct', newPct.toFixed(2));
+            window.dispatchEvent(new Event('resize'));
+        }
+    });
+}
+
+// Inicializar el resizer en cuanto el DOM esté listo
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPdfSplitResizer);
+} else {
+    initPdfSplitResizer();
+}
+
 window.highlightSourceInPdf = function(pageNum, bbox, label, valueSnippet = '') {
     if (window.activePdfViewer) {
         window.activePdfViewer.highlightSource(pageNum, bbox, label, valueSnippet);

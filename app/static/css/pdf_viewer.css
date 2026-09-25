@@ -2,28 +2,28 @@
    PyDective PDF Viewer & Visual Grounding Styles (ADR-005, RF-100, RF-101, RF-102)
    ========================================================================== */
 
-/* Split Layout Container */
+/* Split Layout Container (Flexible Resizable Layout) */
 .pydective-split-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-    align-items: start;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
     margin-top: 1.5rem;
     width: 100%;
+    min-width: 0;
+    position: relative;
 }
 
-@media (max-width: 1100px) {
-    .pydective-split-layout {
-        grid-template-columns: 1fr;
-    }
-}
-
-/* Left Pane: PDF Viewer */
+/* Left Pane: PDF Viewer (Expanded default width & bounded flexibility) */
 .pdf-viewer-pane {
     position: sticky;
     top: 5rem;
     height: calc(100vh - 7rem);
     min-height: 600px;
+    width: 58%;
+    min-width: 340px;
+    max-width: 82%;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     background: var(--bg-card, rgba(18, 26, 47, 0.7));
@@ -31,13 +31,73 @@
     border-radius: var(--radius-lg, 18px);
     overflow: hidden;
     box-shadow: var(--shadow-glass, 0 8px 32px 0 rgba(0, 0, 0, 0.37));
+    transition: width 0.05s ease-out;
+}
+
+/* Draggable Split-Resizer Divider */
+.pydective-split-resizer {
+    width: 14px;
+    margin: 0 4px;
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    user-select: none;
+    -webkit-user-select: none;
+    z-index: 40;
+    flex-shrink: 0;
+    border-radius: 6px;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pydective-split-resizer:hover,
+.pydective-split-resizer.is-resizing {
+    background: rgba(6, 182, 212, 0.15);
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+}
+
+.pydective-resizer-handle {
+    width: 4px;
+    height: 48px;
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.pydective-split-resizer:hover .pydective-resizer-handle,
+.pydective-split-resizer.is-resizing .pydective-resizer-handle {
+    background: var(--primary, #06b6d4);
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.9);
+    height: 68px;
+}
+
+/* Body dragging state helper */
+body.pydective-resizing {
+    cursor: col-resize !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+body.pydective-resizing canvas,
+body.pydective-resizing iframe {
+    pointer-events: none !important;
 }
 
 @media (max-width: 1100px) {
+    .pydective-split-layout {
+        flex-direction: column;
+        gap: 1.5rem;
+    }
     .pdf-viewer-pane {
         position: relative;
         top: 0;
+        width: 100% !important;
+        max-width: 100% !important;
         height: 700px;
+    }
+    .pydective-split-resizer {
+        display: none;
     }
 }
 
@@ -183,6 +243,9 @@
     gap: 1.5rem;
     background: rgba(5, 8, 15, 0.6);
     scroll-behavior: smooth;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 /* Page Card & Canvas */
@@ -193,7 +256,12 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    align-items: center;
     transition: box-shadow 0.2s ease;
+    max-width: none;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    margin: 0 auto;
 }
 
 .pdf-page-card:hover {
@@ -216,11 +284,13 @@
     position: relative;
     display: inline-block;
     line-height: 0;
+    max-width: none;
+    flex-shrink: 0;
 }
 
 .pdf-canvas {
     display: block;
-    max-width: 100%;
+    max-width: none !important;
     height: auto;
 }
 
@@ -527,9 +597,12 @@
 
 /* Right Pane: Info & Chat */
 .pydective-info-pane {
+    flex: 1;
+    min-width: 320px;
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    overflow-x: hidden;
 }
 
 /* Interactive Citation Pills & Grounding Triggers */

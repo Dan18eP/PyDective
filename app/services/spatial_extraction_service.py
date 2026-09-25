@@ -120,20 +120,20 @@ def normalize_date_string(text: str) -> Optional[str]:
     cleaned = text.strip()
 
     # 1. ISO format: YYYY-MM-DD
-    iso_match = re.search(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", cleaned)
+    iso_match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", cleaned)
     if iso_match:
         y, m, d = iso_match.groups()
         return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
 
     # 2. Formato latino: DD/MM/YYYY o DD-MM-YYYY
-    lat_match = re.search(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b", cleaned)
+    lat_match = re.search(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", cleaned)
     if lat_match:
         d, m, y = lat_match.groups()
         return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
 
     # 3. Formato textual: "15 de abril de 2026"
     text_match = re.search(
-        r"\b(\d{1,2})\s+de\s+([a-zA-ZáéíóúÁÉÍÓÚ]+)\s+de\s+(\d{4})\b",
+        r"(\d{1,2})\s+de\s+([a-zA-ZáéíóúÁÉÍÓÚ]+)\s+de\s+(\d{4})",
         cleaned,
         re.IGNORECASE,
     )
@@ -149,12 +149,12 @@ def normalize_date_string(text: str) -> Optional[str]:
 
 def normalize_tax_id(text: str) -> Optional[str]:
     """
-    Normaliza números de identificación tributaria (NIT/RUT).
-    Ejemplo: "900.543.210-8" -> "900543210-8"
+    Normaliza números de identificación tributaria (NIT/RUT) o cédulas (CC).
+    Ejemplo: "900.543.210-8" -> "900543210-8", "32.848.952" -> "32848952"
     """
     if not text:
         return None
-    match = re.search(r"(\d[\d\.\s]*-\s*\d|\d{8,11})", text)
+    match = re.search(r"(\d[\d\.\s]*-\s*\d|\b\d{7,11}\b)", text)
     if match:
         clean = re.sub(r"[\.\s]", "", match.group(1))
         return clean
@@ -381,6 +381,9 @@ def extract_spatial_key_values(
         synonyms = expand_parameter_synonyms(param)
         found_for_param = False
         is_entity_param = any(k in param for k in ("nombre", "titular", "arrendador", "arrendatario", "representante", "contratante", "contratista", "cliente", "proveedor", "notario", "perito", "solicitante", "otorgante", "compareciente"))
+        is_currency_param = any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto", "saldo"))
+        is_date_param = any(k in param for k in ("fecha", "date", "emision", "vencimiento"))
+        is_tax_param = any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion"))
 
         # Si ya se identificó mediante análisis contractual directo, usar el hallazgo directamente
         if param in legal_map:
@@ -389,20 +392,51 @@ def extract_spatial_key_values(
 
         param_candidates = []
 
-        # 1. Chequeo de kerning apretado dentro de un mismo token (ej. "Total:1200000" o "NIT:900123")
+        # 1. Chequeo de kerning apretado dentro de un mismo token (ej. "Total:1200000" o "NIT:900123" o "FachaEntrega.01/07/2026" o "ldentiflcaclon.32848952")
         for i, w in enumerate(raw_words):
             raw_token = w[4]
+            parts = None
             if ":" in raw_token:
                 parts = raw_token.split(":", 1)
+            elif re.search(r"[./](?=\d)", raw_token):
+                m_split = re.split(r"[./](?=\d)", raw_token, maxsplit=1)
+                if len(m_split) == 2:
+                    parts = m_split
+
+            if parts:
                 prefix_norm = normalize_parameter(parts[0])
                 val_candidate = parts[1].strip()
-                if prefix_norm in synonyms and val_candidate:
-                    evidence_counter += 1
-                    ev_id = f"ev_p{page_num}_{evidence_counter:03d}"
+
+                is_match = (prefix_norm in synonyms) or any(s in prefix_norm for s in synonyms if len(s) >= 4)
+                if not is_match and "nit" in param:
+                    if re.search(r"(?i)^(?:nit|cc|nuip|identific|nt)", prefix_norm):
+                        is_match = True
+                if not is_match and "fecha" in param:
+                    if re.search(r"(?i)^(?:fecha|facha)", prefix_norm):
+                        is_match = True
+
+                if is_match and val_candidate:
+                    # Excluir fechas de nacimiento del parámetro general de documento 'fecha'
+                    if "fecha" in param and any(k in prefix_norm for k in ("nacimiento", "nac")):
+                        continue
 
                     norm_curr, curr_code = normalize_currency_amount(val_candidate)
                     norm_date = normalize_date_string(val_candidate)
                     norm_tax = normalize_tax_id(val_candidate)
+
+                    is_curr_p = any(k in param for k in ("total", "valor", "precio", "canon", "subtotal", "iva", "monto", "saldo"))
+                    is_date_p = any(k in param for k in ("fecha", "date", "emision", "vencimiento"))
+                    is_tax_p = any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion"))
+
+                    if is_curr_p and not norm_curr:
+                        continue
+                    if is_date_p and not norm_date:
+                        continue
+                    if is_tax_p and not (norm_tax or re.search(r"\b\d{7,11}(?:-\d)?\b", val_candidate)):
+                        continue
+
+                    evidence_counter += 1
+                    ev_id = f"ev_p{page_num}_{evidence_counter:03d}"
 
                     if norm_curr and not is_entity_param:
                         val_norm = norm_curr
@@ -417,6 +451,11 @@ def extract_spatial_key_values(
                         val_norm = val_candidate
                         fmt = "TEXT"
 
+                    score = 0.96
+                    if "fecha" in param:
+                        if any(k in prefix_norm for k in ("entrega", "atencion", "emision", "expedicion", "formula", "impresion", "factura")):
+                            score = 0.99
+
                     kwic_ctx = extract_kwic_context(page_text, val_candidate)
                     tipo_ent = "moneda" if fmt in ("COP", "USD", "EUR") else ("fecha" if fmt == "ISO-8601" else ("nit" if fmt == "NIT" else "texto"))
                     evidence = Evidence(
@@ -425,14 +464,14 @@ def extract_spatial_key_values(
                         text=f"{param.upper()}: {val_candidate}",
                         bbox=[round(w[0], 2), round(w[1], 2), round(w[2], 2), round(w[3], 2)],
                         source=MetodoExtraccion.SPATIAL_VECTOR,
-                        evidence_score=0.96,
+                        evidence_score=score,
                         kwic_snippet=kwic_ctx,
                     )
-                    hallazgos.append(
+                    param_candidates.append(
                         HallazgoEnriquecido(
                             parametro=param,
                             valor=val_candidate,
-                            confianza=0.96,
+                            confianza=score,
                             metodo=MetodoExtraccion.SPATIAL_VECTOR,
                             evidencias=[evidence],
                             valor_normalizado=val_norm,
@@ -442,11 +481,6 @@ def extract_spatial_key_values(
                             kwic_context=kwic_ctx,
                         )
                     )
-                    found_for_param = True
-                    break
-
-        if found_for_param:
-            continue
 
         for syn in synonyms:
             syn_norm = normalize_parameter(syn)
@@ -458,7 +492,11 @@ def extract_spatial_key_values(
 
             for i, w in enumerate(raw_words):
                 w_norm = normalize_parameter(w[4]).strip(":-_.,")
-                if w_norm == syn_tokens[0] or (len(syn_tokens[0]) > 4 and syn_tokens[0] in w_norm):
+                is_key_start = (w_norm == syn_norm) or (w_norm == syn_tokens[0]) or (syn_norm in w_norm) or (len(syn_tokens[0]) > 4 and syn_tokens[0] in w_norm)
+                if not is_key_start and "nit" in param and re.search(r"^(?:nit|nt|cc|nuip|identific)", w_norm):
+                    is_key_start = True
+
+                if is_key_start:
                     # Evitar falsos positivos en oraciones continuas precedidas por preposiciones o artículos
                     if i > 0 and raw_words[i - 1][4].lower() in ("a", "la", "el", "en", "por", "de", "del", "con", "una", "un") and not w[4].endswith(":") and len(syn_tokens) == 1:
                         if not ("fecha" in param and raw_words[i - 1][4].lower() in ("con", "de")):
@@ -472,7 +510,7 @@ def extract_spatial_key_values(
 
                     matched = True
                     last_idx = i
-                    if len(syn_tokens) > 1:
+                    if len(syn_tokens) > 1 and w_norm != syn_norm and syn_norm not in w_norm:
                         for k in range(1, len(syn_tokens)):
                             if i + k < len(raw_words):
                                 next_w_norm = normalize_parameter(raw_words[i + k][4]).strip(":-_.,")
@@ -504,6 +542,7 @@ def extract_spatial_key_values(
                             right_words.append(w)
 
                 found_right = False
+                found_down = False
                 if right_words:
                     right_words.sort(key=lambda item: item[0])
                     val_text = " ".join([w[4] for w in right_words]).strip()
@@ -527,9 +566,18 @@ def extract_spatial_key_values(
                         if len(cut_match) > 1:
                             val_text = cut_match[0].strip()
 
-                        # Si es persona o entidad, remover prefijos gramaticales conectores y cargos
+                        # Si es persona o entidad, remover prefijos gramaticales conectores, cargos y etiquetas compuestas
                         next_line_words = []
                         if is_entity_param:
+                            val_text = re.sub(
+                                r"^(?:completo\s+)?(?:usuario|titular|paciente|cliente|afiliado|senor[a]?|nombre(?:\s+completo)?)\s*[:.-]*\s*",
+                                "",
+                                val_text,
+                                flags=re.IGNORECASE,
+                            ).strip()
+                            cut_label = re.split(r"\b(?:direccion|direcci[oó]n|telefono|tel|celular|domicilio|ciudad|fecha|nit|cc|edad|sexo|afiliado)\s*[:.-]", val_text, flags=re.IGNORECASE)
+                            if cut_label and cut_label[0].strip():
+                                val_text = cut_label[0].strip()
                             val_text = re.sub(r"^(?:por|de|el|la)\s+", "", val_text, flags=re.IGNORECASE).strip()
                             val_text = re.sub(r"^(?:titular|encargado|adjunto|publico)\s+", "", val_text, flags=re.IGNORECASE).strip()
                             if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", val_text, re.IGNORECASE):
@@ -549,12 +597,18 @@ def extract_spatial_key_values(
                                     cut_next = re.split(r",\s*(?:mayor|con\s+c[eé]dula|con\s+nit|identificad|quien|de\s+fecha)\b", next_line_text, flags=re.IGNORECASE)
                                     if cut_next and cut_next[0].strip():
                                         cand_ext = cut_next[0].strip()
-                                        if not re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", cand_ext, re.IGNORECASE):
-                                            val_text = (val_text + " " + cand_ext).strip()
+                                        if not re.search(r":|\b(?:direccion|direcci[oó]n|telefono|tel|celular|domicilio|ciudad|fecha|nit|cc|edad|sexo|afiliado)\b", cand_ext, re.IGNORECASE):
+                                            if not re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", cand_ext, re.IGNORECASE):
+                                                val_text = (val_text + " " + cand_ext).strip()
 
-                        # Si buscamos NIT, delimitar estrictamente al patrón numérico
+                            # Corte de seguridad por si aún quedara una etiqueta posterior con dos puntos
+                            cut_post = re.split(r"\s+[a-zA-ZáéíóúÁÉÍÓÚ]+:\s*", val_text)
+                            if cut_post and cut_post[0].strip():
+                                val_text = cut_post[0].strip()
+
+                        # Si buscamos NIT, delimitar estrictamente al patrón numérico (cédulas 7-10 dígitos o NITs)
                         if any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion")):
-                            nit_m = re.search(r"(\d[\d\.\s]*-\s*\d|\b\d{7,10}\b)", val_text)
+                            nit_m = re.search(r"(\d[\d\.\s]*-\s*\d|\b\d{7,11}\b)", val_text)
                             if nit_m:
                                 val_text = nit_m.group(0).strip()
 
@@ -563,6 +617,8 @@ def extract_spatial_key_values(
                             curr_m = re.search(r"(\$\s*[\d\.,]+(?:\s*COP|\s*USD|\s*EUR)?|USD\s*[\d\.,]+|EUR\s*[\d\.,]+)", val_text)
                             if curr_m:
                                 val_text = curr_m.group(0).strip()
+                            elif val_text.endswith("$") or re.search(r"\$\s*0*(?:\b|$)", val_text) or val_text in ("0", "$0", "$ 0", "0.00", "$"):
+                                val_text = "$0.00 COP"
 
                     # Descartar unidades de encabezado de tabla como (COP) o si quedó vacío
                     if val_text and val_text.lower() not in ("(cop)", "(usd)", "(eur)", ":", "-"):
@@ -647,6 +703,7 @@ def extract_spatial_key_values(
 
                 # 3b. Vector vertical descendente (solo cuando NO hay contenido a la derecha, US-07 Escenario 2)
                 if not found_right:
+                    found_down = False
                     down_candidates = []
                     for w in raw_words:
                         dy = w[1] - k_y1
@@ -719,7 +776,14 @@ def extract_spatial_key_values(
                             is_tax_param = any(k in param for k in ("nit", "rut", "cuit", "cedula", "identificacion"))
 
                             if is_currency_param and not norm_curr:
-                                continue
+                                if any(k in syn_norm for k in ("total", "cuota", "copago")):
+                                    val_text = "$0.00 COP"
+                                    norm_curr = "0.00"
+                                    curr_code = "COP"
+                                    fmt = "COP"
+                                    score = 0.90
+                                else:
+                                    continue
                             if is_date_param and not norm_date:
                                 continue
                             if is_tax_param and not (norm_tax or re.search(r"\b\d{7,10}(?:-\d)?\b", val_text)):
@@ -768,20 +832,67 @@ def extract_spatial_key_values(
                                     kwic_context=kwic_ctx,
                                 )
                             )
+                            found_down = True
+
+                # Fallback para órdenes médicas / facturas POS con copago o saldo 0
+                if not found_down and not found_right and is_currency_param and any(k in syn_norm for k in ("total", "cuota", "copago")):
+                    evidence_counter += 1
+                    ev_id = f"ev_p{page_num}_{evidence_counter:03d}"
+                    evidence = Evidence(
+                        evidence_id=ev_id,
+                        page=page_num,
+                        text=f"{param.upper()}: $0.00 COP",
+                        bbox=[round(k_x0, 2), round(k_y0, 2), round(k_x1, 2), round(k_y1, 2)],
+                        source=MetodoExtraccion.SPATIAL_VECTOR,
+                        evidence_score=0.90,
+                        kwic_snippet=extract_kwic_context(page_text, raw_words[last_w_idx][4]),
+                    )
+                    param_candidates.append(
+                        HallazgoEnriquecido(
+                            parametro=param,
+                            valor="$0.00 COP",
+                            confianza=0.90,
+                            metodo=MetodoExtraccion.SPATIAL_VECTOR,
+                            evidencias=[evidence],
+                            valor_normalizado="0.00",
+                            formato_detectado="COP",
+                            tipo_entidad="moneda",
+                            divisa="COP",
+                            kwic_context=evidence.kwic_snippet,
+                        )
+                    )
 
         # Seleccionar el mejor candidato para este parámetro:
         if param_candidates:
             if is_entity_param:
-                # Para personas o empresas: priorizar nombres completos textuales (>= 2 palabras) sin caracteres numéricos
+                # Para personas o empresas: priorizar nombres propios (2 a 4 palabras) sin acrónimos institucionales ni dígitos
+                def _entity_rank(c):
+                    val = c.valor.strip()
+                    tokens = val.split()
+                    penalizacion = 0
+                    if re.search(r"\b(?:ips|ese|eps|sas|ltda|nit|cc|dr|dra|medico|ordenes|formula)\b", val, re.IGNORECASE) or "." in val:
+                        penalizacion -= 5
+                    if re.search(r"^\d", val) or c.formato_detectado in ("COP", "USD", "EUR", "ISO-8601", "NIT"):
+                        penalizacion -= 10
+                    is_title_or_upper = val.isupper() or all(t[0].isupper() for t in tokens if t)
+                    return (
+                        penalizacion,
+                        1 if is_title_or_upper else 0,
+                        len(tokens) if 2 <= len(tokens) <= 4 else -len(tokens),
+                        c.confianza,
+                    )
+                param_candidates.sort(key=_entity_rank, reverse=True)
+            elif "fecha" in param:
+                # Priorizar fechas de trámite/documento y castigar fechas de nacimiento
                 param_candidates.sort(
                     key=lambda c: (
-                        -1 if (c.formato_detectado in ("COP", "USD", "EUR", "ISO-8601", "NIT") or re.search(r"^\d", c.valor)) else len(c.valor.split()),
+                        -1.0 if any(k in c.valor.lower() or (c.kwic_context and k in c.kwic_context.lower()) for k in ("nacimiento", "nac.", "f.nac")) else 1.0,
                         c.confianza,
                     ),
                     reverse=True,
                 )
             else:
-                # Para montos, fechas y NITs: priorizar normalización tipificada estricta
+                # Para montos y NITs: priorizar normalización tipificada estricta
                 param_candidates.sort(
                     key=lambda c: (
                         1 if c.formato_detectado in ("COP", "USD", "EUR", "ISO-8601", "NIT") else 0,
@@ -802,7 +913,10 @@ def _eval_finding_quality(f: Optional[HallazgoEnriquecido]) -> float:
         return -10.0
     if raw.endswith(":") or ":" in raw or raw_l in ("del contrato:", "a pagar:", "total:"):
         return -5.0
-    if any(k in f.parametro for k in ("representante", "arrendador", "contratante", "perito", "contratista", "cliente", "notario")):
+    if "fecha" in f.parametro:
+        if any(k in raw_l or (f.kwic_context and k in f.kwic_context.lower()) for k in ("nacimiento", "nac.", "f.nac")):
+            return -2.0
+    if any(k in f.parametro for k in ("representante", "arrendador", "contratante", "perito", "contratista", "cliente", "notario", "nombre")):
         if re.search(r"^(?:[-:·•\s]*)(?:c\.?c\.?|n\.?i\.?t\.?|c[eé]dula|\d)", raw, re.IGNORECASE):
             return -10.0
         tokens = raw.split()
@@ -873,9 +987,9 @@ def consolidate_findings(
             assert nat is not None and ai is not None
             # Ambos son válidos
             if nat.valor_normalizado and nat.valor_normalizado == ai.valor_normalizado:
-                # Acuerdo pleno nativo-IA: máxima certeza
-                nat.confianza = 1.0
-                consolidated.append(nat)
+                # Acuerdo pleno nativo-IA: máxima certeza multimodal
+                ai.confianza = 1.0
+                consolidated.append(ai)
             elif nat.confianza >= 0.70 and nat.valor_normalizado and not nat.valor.endswith(":"):
                 # Precedencia estricta del dato determinista nativo válido (US-10 Escenario 2)
                 consolidated.append(nat)

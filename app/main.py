@@ -629,6 +629,10 @@ async def procesar_documento(
                             for h in gemini_res.hallazgos:
                                 page_res.evidencias.extend(h.evidencias)
         finally:
+            try:
+                save_uploaded_pdf(pdf_hash, doc.tobytes())
+            except Exception as exc:
+                logger.debug(f"No se pudo guardar PDF enriquecido en RAM: {exc}")
             doc.close()
 
         # Consolidar hallazgos aplicando precedencia absoluta de texto nativo sobre IA (US-10)
@@ -1021,6 +1025,10 @@ async def procesar_documento_stream(
 
             yield f"data: {json.dumps({'tipo': 'completado', 'pdf_hash': pdf_hash, 'status': output.status.value, 'nivel_cache': output.nivel_cache.value, 'duracion_total_ms': output.duracion_total_ms, 'paginas_totales': total_pages, 'paginas_pendientes': output.paginas_pendientes, 'hallazgos': [h.model_dump() for h in final_hallazgos], 'motor_seleccionado': motor_vision, 'comparativa_motores': comparativa_motores})}\n\n"
         finally:
+            try:
+                save_uploaded_pdf(pdf_hash, doc.tobytes())
+            except Exception as exc:
+                logger.debug(f"No se pudo guardar PDF enriquecido en RAM: {exc}")
             doc.close()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -128,3 +128,19 @@ def test_negative_visual_queries(sample_multi_page_document):
     out_seal = deterministic_search(sample_multi_page_document, "hay sellos oficiales?")
     assert out_seal is not None
     assert "no se identificaron sellos oficiales" in out_seal.respuesta.lower()
+
+
+def test_page_content_query_que_tiene(sample_multi_page_document):
+    """Verifica que 'que tiene la pagina 1' y 'que contiene la pagina 2' respondan determinísticamente."""
+    out_p1 = deterministic_search(sample_multi_page_document, "que tiene la pagina 1")
+    assert out_p1 is not None
+    assert "[Página 1]" in out_p1.citas
+    assert "manual de gestión" in out_p1.respuesta.lower() or "especificaciones" in out_p1.respuesta.lower()
+
+
+def test_patient_client_identity_matching(sample_multi_page_document):
+    """Verifica que consultas de identidad de cliente o partes extraigan el bloque contractual de la página correcta."""
+    out = deterministic_search(sample_multi_page_document, "quien es el cliente")
+    assert out is not None
+    assert any("[Página" in c for c in out.citas)
+

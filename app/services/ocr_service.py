@@ -51,9 +51,14 @@ def clean_ocr_line(line: str) -> str:
     # Correcciones de fecha
     cleaned = re.sub(r'(?i)fechadeactuac[^\s:]*', 'fecha de actuacion', cleaned)
     cleaned = re.sub(r'(?i)cbrculo', 'circulo', cleaned)
-    # Corrección de terminaciones Q por O en nombres propios (ej. ANTONIQ -> ANTONIO, antoniq -> antonio)
+    # Correcciones de terminaciones Q por O en nombres propios (ej. ANTONIQ -> ANTONIO, antoniq -> antonio)
     cleaned = re.sub(r'([A-Z]{3,})Q\b', r'\g<1>O', cleaned)
     cleaned = re.sub(r'([a-z]{3,})q\b', r'\g<1>o', cleaned)
+    # Correcciones de términos frecuentes en documentos de identidad y médicos
+    cleaned = re.sub(r'(?i)\bteiefooo\b|\btelefooo\b', 'telefono', cleaned)
+    cleaned = re.sub(r'(?i)\bidentificaceen\b', 'identificacion', cleaned)
+    cleaned = re.sub(r'(?i)\bc[ií]lidaoania\b|\bciudaania\b|\bciuoadania\b', 'ciudadania', cleaned)
+    cleaned = re.sub(r'(?i)\bpfevisalod\b', 'Previsalud', cleaned)
     # Separación de apellidos fusionados por artefactos de escaneo
     cleaned = re.sub(
         r'([A-Z]{3,})(OSPINA|MEJIA|ALVAREZ|HENAO|BOTERO|RIVERA|CASTILLO|LONDONO|TORRES|DUQUE)',

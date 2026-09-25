@@ -32,7 +32,15 @@ SPANISH_STOP_WORDS: Set[str] = {
 SYNONYM_MAP: Dict[str, List[str]] = {
     "cliente": [
         "cliente", "arrendatario", "comprador", "contratante", "titular",
-        "usuario", "demandante", "suscriptor", "pagador", "arrendataria"
+        "usuario", "demandante", "suscriptor", "pagador", "arrendataria",
+        "paciente", "afiliado", "beneficiario", "ciudadano"
+    ],
+    "paciente": [
+        "paciente", "usuario", "afiliado", "beneficiario", "cliente",
+        "titular", "ciudadano", "identificacion", "nombre", "cedula", "nuip"
+    ],
+    "telefono": [
+        "telefono", "telefooo", "celular", "contacto", "movil", "fijo", "tel"
     ],
     "arrendatario": [
         "arrendatario", "arrendataria", "cliente", "inquilino", "ocupante", "arrendatarios"
@@ -542,8 +550,9 @@ def _extract_page_content_query(
 
     is_page_lookup = any(
         k in pregunta_norm for k in (
-            "que hay", "que contiene", "que dice", "contenido", "informacion",
-            "resumen", "detalla", "muestra", "ver", "revisar", "texto"
+            "que hay", "que contiene", "que tiene", "que dice", "contenido", "informacion",
+            "resumen", "detalla", "muestra", "ver", "revisar", "texto", "que registra",
+            "que aparece", "que figura", "que hay en", "que tiene en"
         )
     ) or re.match(r"^(?:pag(?:ina)?|p[áa]g(?:ina)?|folio)\s*\d+$", pregunta_norm.strip())
 
@@ -773,7 +782,10 @@ def deterministic_search(
         k in q_clean for k in (
             "partes y representantes", "representantes", "quienes son las partes",
             "cuales son las partes", "partes del contrato", "partes identificadas",
-            "partes involucradas", "quien firma", "quienes firman"
+            "partes involucradas", "quien firma", "quienes firman",
+            "quien es el cliente", "quien es el paciente", "quien es el usuario",
+            "como se llama el paciente", "como se llama el usuario",
+            "nombre del paciente", "nombre del cliente"
         )
     )
 

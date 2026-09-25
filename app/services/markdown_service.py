@@ -62,6 +62,20 @@ def generate_page_indexed_markdown(
         if not page_text:
             page_text = doc[idx].get_text("text").strip()
 
+        # Si aún no hay texto sustantivo (<20 caracteres) y la página es un escaneo o imagen,
+        # ejecutar OCR local multiplataforma (Windows Native OCR / RapidOCR) de inmediato
+        if len(page_text) < 20:
+            try:
+                from app.services.image_ocr_extractor import is_page_scanned_image, extract_page_ocr_cross_platform
+                if is_page_scanned_image(doc[idx]):
+                    ocr_text, ocr_boxes = extract_page_ocr_cross_platform(doc[idx])
+                    if ocr_text and ocr_text.strip():
+                        page_text = ocr_text.strip()
+                        from app.services.ocr_service import inject_ocr_text_layer
+                        inject_ocr_text_layer(doc[idx], ocr_boxes)
+            except Exception as exc:
+                logger.debug(f"Error ejecutando OCR en página {page_num}: {exc}")
+
         # Normalizar espacios horizontales redundantes preservando saltos de línea
         page_text = re.sub(r"[ \t]{2,}", " ", page_text)
 

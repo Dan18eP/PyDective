@@ -144,7 +144,8 @@ def process_chat_query(
     pregunta: str,
     historial: List[ChatMessage] = [],
     fallback_store: Optional[Dict[str, Any]] = None,
-) -> ChatOutput:
+    skip_llm: bool = False,
+) -> Optional[ChatOutput]:
     """
     Procesa consultas en lenguaje natural con inteligencia contextual, búsqueda en L1,
     catálogo de elementos visuales (códigos de barras, QR, firmas, sellos) y respuestas conversacionales fluidas (US-23).
@@ -369,12 +370,21 @@ def process_chat_query(
             return synth_out
 
     # 4c. Modo conversacional con LLM/SLM local (Opción 2)
+    if skip_llm:
+        return None
+
     # Si hay un proveedor LLM disponible, evaluar el documento indexado en RAM
     if llm_provider.is_available():
         # Ventana Quirúrgica (Targeted Page Slicing): enviar únicamente las 1-2 páginas relevantes para ahorrar 95% de tokens
         target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
         if not target_context:
             target_context = get_or_create_page_indexed_markdown(pdf_hash)
+
+        # Sanitizar contexto: Si la pregunta no es visual, remover etiquetas técnicas [Elemento Visual: ...]
+        is_visual_q = any(k in q_norm for k in ("imagen", "imagenes", "foto", "fotografia", "diagrama", "grafico", "grafica", "sello", "firma", "codigo", "visual"))
+        if not is_visual_q and target_context:
+            lines_clean = [l for l in target_context.splitlines() if not l.strip().startswith("[Elemento Visual:")]
+            target_context = "\n".join(lines_clean)
 
         if target_context:
             try:
@@ -399,7 +409,8 @@ def process_chat_query(
                         "REGLAS DE OBLIGATORIO CUMPLIMIENTO:\n"
                         "1. Debes identificar en qué número de página exacta se encuentra la información utilizando como referencia única las etiquetas ocultas del documento: `<!-- INICIO_PAGINA_X -->`.\n"
                         "2. Tu respuesta debe ser breve, directa y estructurada, indicando la página y el dato exacto hallado (ej: '[Página X]').\n"
-                        "3. Si el usuario te pregunta algo que no se encuentra en el documento, responde indicando que la información no está disponible."
+                        "3. Si el usuario te pregunta algo que no se encuentra en el documento, responde indicando que la información no está disponible.\n"
+                        "4. NUNCA repitas etiquetas de maquetación técnica ni bloques '[Elemento Visual: ...]' en tu respuesta. Responde exclusivamente con texto redactado en lenguaje natural."
                     )
                     prompt = (
                         "--- INICIO DEL DOCUMENTO ---\n"
@@ -530,20 +541,32 @@ def process_chat_query_stream(
         )
     )
 
-    # 1. Si es resumen global o búsqueda determinista de parámetros/imágenes, resolver en RAM (Opción 1)
+    # 1. Intentar resolución determinista ultrarrápida en RAM (<5ms, 0 tokens)
     out = process_chat_query(
         pdf_hash=pdf_hash,
         pregunta=pregunta,
         historial=historial,
         fallback_store=fallback_store,
+        skip_llm=True,
     )
+    if out is not None:
+        yield f"data: {json.dumps({'token': out.respuesta, 'citas': out.citas, 'final': True})}\n\n"
+        return
 
     from app.services.providers import get_llm_provider
     llm_prov = get_llm_provider()
 
-    # Si la consulta fue resuelta por la Opción 1 (sintética en RAM) o el buscador determinista
-    if is_global_summary or not hasattr(llm_prov, "generate_chat_stream") or not llm_prov.is_available():
-        yield f"data: {json.dumps({'token': out.respuesta, 'citas': out.citas, 'final': True})}\n\n"
+    # Si el proveedor LLM no soporta streaming o no está disponible, resolver con fallback tradicional
+    if not hasattr(llm_prov, "generate_chat_stream") or not llm_prov.is_available():
+        fallback_out = process_chat_query(
+            pdf_hash=pdf_hash,
+            pregunta=pregunta,
+            historial=historial,
+            fallback_store=fallback_store,
+            skip_llm=False,
+        )
+        if fallback_out:
+            yield f"data: {json.dumps({'token': fallback_out.respuesta, 'citas': fallback_out.citas, 'final': True})}\n\n"
         return
 
     # Si es una consulta abierta hacia el SLM local, transmitir streaming token por token
@@ -551,9 +574,18 @@ def process_chat_query_stream(
     if not target_context:
         target_context = get_or_create_page_indexed_markdown(pdf_hash)
 
+    # Sanitizar contexto: Si la pregunta no es visual, remover etiquetas técnicas [Elemento Visual: ...]
+    is_visual_q = any(k in q_norm for k in ("imagen", "imagenes", "foto", "fotografia", "diagrama", "grafico", "grafica", "sello", "firma", "codigo", "visual"))
+    if not is_visual_q and target_context:
+        lines_clean = [l for l in target_context.splitlines() if not l.strip().startswith("[Elemento Visual:")]
+        target_context = "\n".join(lines_clean)
+
     sys_instruction = (
-        "Eres un asistente documental experto. Responde brevemente basándote exclusivamente en el contexto provisto. "
-        "Cita siempre la página de origen en formato '[Página X]'."
+        "Eres un asistente documental experto analizando folios y expedientes. "
+        "Responde brevemente basándote exclusivamente en el contexto provisto. "
+        "Cita siempre la página de origen en formato '[Página X]'. "
+        "Nunca repitas etiquetas de maquetación técnica ni bloques '[Elemento Visual: ...]' en tu respuesta. "
+        "Responde en lenguaje natural claro y directo."
     )
     prompt = (
         "--- INICIO DEL DOCUMENTO ---\n"

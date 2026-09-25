@@ -52,78 +52,36 @@ MOJIBAKE_MAP: List[Tuple[re.Pattern, str]] = [
 ]
 
 
-# Correcciones específicas para escaneos de facturas médicas, dispensación y cédulas colombianas
-SCAN_ARTIFACTS_MAP: List[Tuple[re.Pattern, str]] = [
-    # Encabezados de cédula y fórmulas
-    (re.compile(r"(?i)\bc[ée\ufffd]dula\s+oe\b|\bc[\ufffd\?i]jla\s+oe\b|\bc[\ufffd\?i]dla\s+oe\b|\bcleulade\b|\bceoulalde\b"), "CÉDULA DE"),
+# Correcciones genéricas para escaneos de documentos en español (cédulas, facturas, formularios administrativos)
+# 100% Universal — CERO datos de documentos específicos
+GENERIC_OCR_REPAIR_MAP: List[Tuple[re.Pattern, str]] = [
+    # 1. Encabezados y campos administrativos estándar universales
+    (re.compile(r"(?i)\bc[ée\ufffd]dula\s+oe\b|\bc[\ufffd\?i]jla\s+oe\b|\bc[\ufffd\?i]dla\s+oe\b|\bcleulade\b|\bceoulalde\b|\bcedulade\b"), "CÉDULA DE"),
     (re.compile(r"(?i)\bc[íi]lidaoania\b|\bciudaania\b|\bciuoadania\b|\bctlidadanla\b|\bctljdadanla\b|\bchdadana\b|\bbudaana\b"), "CIUDADANÍA"),
-    (re.compile(r"(?i)\bage3[íi]idos\b|\bage3idos\b|\bapefl!dos\b|\bapefl\?dos\b|\baoethdos\b"), "Apellidos:"),
+    (re.compile(r"(?i)\brepublicade\b"), "REPÚBLICA DE"),
+    (re.compile(r"(?i)\bage3[íi]idos\b|\bage3idos\b|\bapefl!dos\b|\bapefl\?dos\b|\baoethdos\b|\banethdos\b"), "Apellidos:"),
     (re.compile(r"(?i)\bnombrs\b|\bnom\?tes\b|\bnom[\ufffd\?]tes\b|\bnombces\b"), "Nombres:"),
     (re.compile(r"(?i)\bnornicilio\b|\bliornicili\b"), "Domicilio:"),
     (re.compile(r"(?i)\berttcega\b"), "Entrega:"),
-    (re.compile(r"(?i)\bformula\s+aro\.?\b|\bformula\s+nro\.?\b"), "FÓRMULA NRO."),
     (re.compile(r"(?i)\brooucto\b"), "PRODUCTO"),
-    (re.compile(r"(?i)\bidentificaceen\.?\b|\bfdentificacion\s+interna\b"), "Identificación:"),
-    (re.compile(r"(?i)\bacta\s+entrega\s+oe\b|\bactadeentregademedicamentos\b"), "ACTA DE ENTREGA DE MEDICAMENTOS"),
-    (re.compile(r"(?i)\bmedic[\ufffd\?a-z]*meutos\b"), "MEDICAMENTOS"),
-    (re.compile(r"(?i)\bdispositivos\s+[\ufffd\?a-z]*dicos\b|\bydisfositivos\s+medicos\s+ausuarios\b"), "Y DISPOSITIVOS MÉDICOS A USUARIOS"),
-    (re.compile(r"(?i)\bpunto\s+sabana\s+2026\b|\bpuntosabanalarga\s+zozg\b"), "Punto Sabanalarga 2026"),
-    (re.compile(r"(?i)\bsucursal\s+1[o0]12\b"), "Sucursal 1012"),
-
-    # Nombres de paciente y partes
-    (re.compile(r"(?i)frio,['\s]*rzbre\s*usuario\.?\s*a1\s*ryan"), "Nombre usuario: MIRYAN"),
-    (re.compile(r"(?i)frio,['\s]*rzbre\s*usuario"), "Nombre usuario:"),
-    (re.compile(r"(?i)\bbedlna\s*bercado\s*mry\b|\bmedina\s*mercado\s*mryan\s*esther\b"), "MEDINA MERCADO MIRYAN ESTHER"),
-    (re.compile(r"(?i)\bmedina\s*blanouiceth\b"), "MEDINA BLANQUICETH"),
-    (re.compile(r"(?i)\bmirianesther\b"), "MIRIAN ESTHER"),
-    (re.compile(r"(?i)\bmiryanesther\b"), "MIRYAN ESTHER"),
-    (re.compile(r"(?i)\bbedlna\s*bercado\b"), "MEDINA MERCADO"),
-    (re.compile(r"(?i)\bredinaercado\s*mry\b"), "MEDINA MERCADO MARY"),
-    (re.compile(r"(?i)\bredinaercado\b"), "MEDINA MERCADO"),
-    (re.compile(r"(?i)\{yan\s*esther\b"), "MIRYAN ESTHER"),
-    (re.compile(r"(?i)\ba1\s*ryan\b"), "MIRYAN"),
-    (re.compile(r"(?i)\bmedinamer\s*mry\b"), "MEDINA MERCADO MARY"),
-    (re.compile(r"(?i)\beste[\"'d\ufffd\?]+er\b"), "ESTHER"),
-    (re.compile(r"(?i)\bwquien\s+reclama\b|\bquien\s+reclama\b"), "QUIEN RECLAMA:"),
-    (re.compile(r"(?i)\bfirtia\s+para\s+canstancla\s+de\s+racibidoa\s+satisfaccton\b"), "Firma para constancia de recibido a satisfacción"),
-
-    # Medicamentos frecuentes en facturas y órdenes
-    (re.compile(r"(?i)\bsartalu\s*50\s*tab\b|\bsartan\s*50\s*tab\b|\bdsartan\s*so\s*mg\s*tab\b"), "LOSARTAN 50 mg TABLETAS"),
-    (re.compile(r"(?i)\bsartalu\b|\bsartan\b|\bdsartan\b"), "LOSARTAN"),
-    (re.compile(r"(?i)\borocloratiazida\s*tab\s*ca3a\b|\borocloratiazioa\s*tab\s*caja\b|\bdrocloratiazida\s*25\s*mg\s*tab\b"), "HIDROCLOROTIAZIDA 25 mg TABLETAS"),
-    (re.compile(r"(?i)\borocloratiazida\b|\borocloratiazioa\b|\bdrocloratiazida\b"), "HIDROCLOROTIAZIDA"),
-    (re.compile(r"(?i)'?oroxicio\s*6\s*frasco\s*360|\bdroxicio\s*6|\boxido\s+de\s+aluminio\s+6\s*gr|\bhidroxido\s+dealuminio\s+6gr"), "HIDROXIDO DE ALUMINIO 6% FRASCO"),
-    (re.compile(r"(?i)'?oroxicio\b|\bdroxicio\b"), "HIDROXIDO DE ALUMINIO"),
-    (re.compile(r"(?i)\bp&dicanwnto\b|\bmedicanvlto\b"), "Medicamento:"),
-
-    # Instituciones de salud, médicos y prestadores
-    (re.compile(r"(?i)\bp\[?evisalud\b|\bpfevisalod\b"), "Previsalud"),
-    (re.compile(r"(?i)\bcoosaluc\)\s*prohotora\s*oe\b|\bcoosalu[od0]\s+pro[am]otora\b|\bcoosalud\s+entidad\s+promotora\s+de\s+salud\b"), "COOSALUD PROMOTORA DE SALUD"),
-    (re.compile(r"(?i)\bcoosaluc\b|\bcocnlud\b|\bcoosaluo\b|\bcoosaluco\b|\bcoosaludeps\b"), "COOSALUD"),
-    (re.compile(r"(?i)\bprohotora\s*oe\b"), "PROMOTORA DE"),
-    (re.compile(r"(?i)\be\s*s\.e\.\s*centeo\s*materno\s*infantil\s+de\s+sabanalarga\s*-\s*ceminsa\b"), "E.S.E. Centro Materno Infantil de Sabanalarga - CEMINSA"),
-    (re.compile(r"(?i)\bce>?iins[\ufffd\?aá]?\b|\bcemitsa\b|\beseceminsa\b"), "CEMINSA"),
-    (re.compile(r"(?i)\bedicina\s+genera[l]?\b|\bmedicinageneral\b"), "MEDICINA GENERAL"),
-    (re.compile(r"(?i)\bmecdi\s*co:\s*linamargaritagovez\b|\buna\s+margarita\b|\bedico\.\s*lina\s*gornaz\b|\blina\s*gornaz\b|\blina\s*gomaz\b"), "Médico: Dra. Lina Margarita Gómez"),
-    (re.compile(r"(?i)\bcantro\s*04\s*-\s*sede\s*praso\b|\baenci[\ufffd\?oó]m:\s*04\s*-\s*sede\s*paraso\b|\bcentrodeatencion:\s*o4\s*-\s*sedeparaso\b"), "Centro 04 - SEDE PRADO"),
-    (re.compile(r"(?i)\bdiagnostico\s*principal:\s*i1ox-hipertensionesencial\(primaria\)\b|\bdiagnostico\s*principal:\s*i10x"), "Diagnóstico Principal: I10X - HIPERTENSIÓN ESENCIAL (PRIMARIA)"),
-    (re.compile(r"(?i)\baseguradora:\s*coosalud\s*eps\b"), "Aseguradora: COOSALUD EPS"),
-    (re.compile(r"(?i)\bditeccioncllez\s*n1ta-t4vtlla\s*carmen\b"), "Dirección: Calle 27 N 17A-74 Villa Carmen"),
-    (re.compile(r"(?i)\bliontf[àa]to\b"), "Contrato"),
-    (re.compile(r"(?i)\biod[õo]lldad\b"), "Modalidad"),
-    (re.compile(r"(?i)\bubstdtpoo\b|\bubsidvoo\b"), "SUBSIDIADO"),
-    (re.compile(r"(?i)\bprivria\b"), "PRIMARIA"),
-    (re.compile(r"(?i)\baterei[úu]1\b|\baenci[\ufffd\?oó]m\b"), "Atención:"),
-    (re.compile(r"(?i)\becaci&t\b|\becaci#t\b"), "Estación:"),
-    (re.compile(r"(?i)\bpd[áa]n[üu]co\b|\bn[\ufffd\?a-z]n[\ufffd\?a-z]co\b"), "Polidoc"),
-    (re.compile(r"(?i)\b[ée]ctv\s*de\s*facimiento\b|\baclu\s*de\s*tacimbnto\b"), "Fecha de Nacimiento:"),
-    (re.compile(r"(?i)ii\s*ox-\s*hipertension"), "DX: HIPERTENSIÓN"),
-    (re.compile(r"(?i)\bhipertension\s*ese\b"), "HIPERTENSIÓN ESENCIAL"),
-    (re.compile(r"(?i)\bteiefooo\b|\btelefooo\b|\btel[\ufffd\?e]fmto\b"), "Teléfono:"),
-    (re.compile(r"(?i)\bsabana\s*larg[áa]\b|\bsabanaiarg[\ufffd\?aá]\b"), "Sabanalarga"),
+    (re.compile(r"(?i)\bidentificaceen\.?\b|\bfdentificacion\b"), "Identificación:"),
+    (re.compile(r"(?i)\bactade\b"), "ACTA DE"),
     (re.compile(r"(?i)\bexpad4ton\b"), "expedición"),
     (re.compile(r"(?i)\b1-ugar\b"), "Lugar"),
     (re.compile(r"(?i)\bsexe\b"), "Sexo"),
+    (re.compile(r"(?i)\bteiefooo\b|\btelefooo\b|\btel[\ufffd\?e]fmto\b"), "Teléfono:"),
+
+    # 2. Des-pegado genérico de etiquetas de campo unidas a su valor (ej: "Telefono.301..." -> "Telefono: 301...")
+    (
+        re.compile(
+            r"(?i)\b(telefono|tel|celular|cel|nit|cc|nuip|sucursal|formula|cant|cantidad|posologia|direccion|domicilio|medico|doctor|paciente|usuario|cliente|diagnostico|aseguradora|contrato|modalidad|regimen)[.:]+([a-záéíóú0-9])"
+        ),
+        r"\g<1>: \g<2>",
+    ),
+
+    # 3. Separación de letras pegadas a números y números pegados a letras (ej: "NUIP32.848.952" -> "NUIP 32.848.952")
+    (re.compile(r"([a-zA-ZáéíóúÁÉÍÓÚ]{3,})(\d+)"), r"\g<1> \g<2>"),
+    (re.compile(r"(\d+)([a-zA-ZáéíóúÁÉÍÓÚ]{3,})"), r"\g<1> \g<2>"),
 ]
 
 
@@ -141,8 +99,8 @@ def heal_scanned_text(text: str) -> str:
     for pattern, replacement in MOJIBAKE_MAP:
         cleaned = pattern.sub(replacement, cleaned)
         
-    # 2. Correcciones de artefactos de escaneo y OCR sucio
-    for pattern, replacement in SCAN_ARTIFACTS_MAP:
+    # 2. Correcciones genéricas de artefactos de escaneo y despegado de tokens
+    for pattern, replacement in GENERIC_OCR_REPAIR_MAP:
         cleaned = pattern.sub(replacement, cleaned)
         
     # 3. Limpieza de caracteres de reemplazo unicode residuales

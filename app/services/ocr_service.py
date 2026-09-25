@@ -58,7 +58,6 @@ def clean_ocr_line(line: str) -> str:
     cleaned = re.sub(r'(?i)\bteiefooo\b|\btelefooo\b', 'telefono', cleaned)
     cleaned = re.sub(r'(?i)\bidentificaceen\b', 'identificacion', cleaned)
     cleaned = re.sub(r'(?i)\bc[ií]lidaoania\b|\bciudaania\b|\bciuoadania\b', 'ciudadania', cleaned)
-    cleaned = re.sub(r'(?i)\bpfevisalod\b', 'Previsalud', cleaned)
     # Separación de apellidos fusionados por artefactos de escaneo
     cleaned = re.sub(
         r'([A-Z]{3,})(OSPINA|MEJIA|ALVAREZ|HENAO|BOTERO|RIVERA|CASTILLO|LONDONO|TORRES|DUQUE)',
@@ -70,10 +69,11 @@ def clean_ocr_line(line: str) -> str:
 
 def extract_page_ocr(
     page: pymupdf.Page,
-    dpi: int = 150,
+    dpi: int = 300,
+    img_arr: Optional[np.ndarray] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
-    Ejecuta el pipeline de OCR local sobre una página PDF renderizada como pixmap RGB.
+    Ejecuta el pipeline de OCR local sobre una página PDF o un array numpy ya preprocesado (Deskew/Otsu).
     Retorna el texto unificado y la lista de cajas de texto con coordenadas en puntos PDF.
     """
     engine = get_ocr_engine()
@@ -85,18 +85,22 @@ def extract_page_ocr(
         return "", []
 
     try:
-        pix = page.get_pixmap(dpi=dpi, alpha=False)
-        img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
-        ocr_results, _ = engine(img_arr)
+        if img_arr is not None:
+            scale_x = img_arr.shape[1] / page_rect.width
+            scale_y = img_arr.shape[0] / page_rect.height
+            ocr_results, _ = engine(img_arr)
+        else:
+            pix = page.get_pixmap(dpi=dpi, alpha=False)
+            img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
+            scale_x = pix.width / page_rect.width
+            scale_y = pix.height / page_rect.height
+            ocr_results, _ = engine(img_arr)
     except Exception as exc:
         logger.error("Error ejecutando inferencia OCR en página %s: %s", page.number + 1, exc)
         return "", []
 
     if not ocr_results:
         return "", []
-
-    scale_x = pix.width / page_rect.width
-    scale_y = pix.height / page_rect.height
 
     lines: List[str] = []
     boxes: List[Dict[str, Any]] = []

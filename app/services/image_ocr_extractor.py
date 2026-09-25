@@ -82,7 +82,7 @@ def extract_page_ocr_cross_platform(
     try:
         from app.services.ocr_service import extract_page_ocr, is_ocr_available
         if is_ocr_available():
-            text, boxes = extract_page_ocr(page, dpi=max(dpi, 200))
+            text, boxes = extract_page_ocr(page, dpi=max(dpi, 300), img_arr=img_rgb)
             if text and len(text.strip()) > 10:
                 logger.info(f"[OCR] Página {page.number + 1} procesada exitosamente con RapidOCR: {len(boxes)} cajas de texto.")
                 return text, boxes

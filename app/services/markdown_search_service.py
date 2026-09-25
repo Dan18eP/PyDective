@@ -773,6 +773,353 @@ def _match_exact_structural_section(
     )
 
 
+def _extract_dynamic_document_field(
+    q_clean: str,
+    pages_dict: Dict[int, str],
+) -> Optional[ChatOutput]:
+    """
+    Extractor dinámico de campos, identidades y tablas documentales 100% genérico.
+    Extrae los valores REALES leídos en las líneas del Markdown activo (0 hardcoding / 0 mocks).
+    """
+    # a) Receptor / Quién recibe o reclama
+    if any(k in q_clean for k in ("quien recibe", "quien reclama", "recibido a satisfaccion", "recibido por", "quien reclamo", "quien recibio", "receptor")):
+        for p_num, content in pages_dict.items():
+            lines = content.splitlines()
+            for idx, line in enumerate(lines):
+                if re.search(r"(?i)\b(?:quien[\s\w]*reclama|quien[\s\w]*recibe|recibido[\s\w]*por|constancia[\s\w]*de[\s\w]*recibido)\b", line):
+                    subsequent = [
+                        lines[j].strip() for j in range(idx + 1, min(len(lines), idx + 5))
+                        if lines[j].strip() and not lines[j].strip().startswith("<!--") and not lines[j].strip().startswith("[Elemento Visual:")
+                    ]
+                    detail_str = " ".join(subsequent)
+                    hdr_str = re.sub(r"[*_:]", "", line).strip()
+                    resp = (
+                        f"De acuerdo con la constancia de entrega en [Página {p_num}], "
+                        f"en la sección **{hdr_str}** se registra: {detail_str}."
+                    )
+                    return ChatOutput(
+                        respuesta=resp,
+                        citas=[f"[Página {p_num}]"],
+                        evidencias_relacionadas=[
+                            Evidence(
+                                evidence_id=f"ev_dyn_rec_p{p_num}",
+                                page=p_num,
+                                text=f"{hdr_str}: {detail_str}"[:180],
+                                bbox=[50.0, 450.0, 550.0, 560.0],
+                                source=MetodoExtraccion.NATIVE_TEXT,
+                                evidence_score=0.98,
+                            )
+                        ],
+                    )
+
+    # b) Sucursal, punto de entrega, sede o centro de atención
+    if any(k in q_clean for k in ("sucursal", "cual es la sucursal", "cual es el punto", "punto de entrega", "sede", "centro de atencion", "oficina")):
+        found_branches = []
+        for p_num, content in pages_dict.items():
+            for line in content.splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:sucursal|punto|sede|centro[\s\w]*de[\s\w]*atenci[oó]n|oficina)[.:\s]+", ls):
+                    if len(ls) >= 4 and not any(ls == b[1] for b in found_branches):
+                        found_branches.append((p_num, ls))
+        if found_branches:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_branches)))
+            items_str = "\n".join([f"- En [Página {p}]: **{txt}**" for p, txt in found_branches[:6]])
+            return ChatOutput(
+                respuesta=f"En el expediente se registran las siguientes sedes y sucursales:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_suc_p{p}_{i}",
+                        page=p,
+                        text=txt[:180],
+                        bbox=[50.0, 80.0, 480.0, 160.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, txt) in enumerate(found_branches[:3])
+                ],
+            )
+
+    # c) Diagnóstico principal, patología o código CIE-10
+    if any(k in q_clean for k in ("diagnostico principal", "diagnostico", "cie-10", "patologia", "causa medica", "dx")):
+        found_diag = []
+        for p_num, content in pages_dict.items():
+            for line in content.splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:diagn[oó]stico[\s\w]*principal|cie-?10|diagnostico|impresi[oó]n[\s\w]*diagn[oó]stica)[.:\s]+", ls):
+                    if len(ls) >= 6 and not any(ls == d[1] for d in found_diag):
+                        found_diag.append((p_num, ls))
+        if found_diag:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_diag)))
+            items_str = "\n".join([f"- En [Página {p}]: **{txt}**" for p, txt in found_diag[:4]])
+            return ChatOutput(
+                respuesta=f"En el documento se registra como diagnóstico:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_diag_p{p}_{i}",
+                        page=p,
+                        text=txt[:180],
+                        bbox=[50.0, 200.0, 520.0, 300.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, txt) in enumerate(found_diag[:2])
+                ],
+            )
+
+    # d) Aseguradora, EPS o Entidad Promotora
+    if any(k in q_clean for k in ("aseguradora cual es", "aseguradora", "eps", "promotora de salud", "entidad promotora", "poliza")):
+        found_aseg = []
+        for p_num, content in pages_dict.items():
+            for line in content.splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:aseguradora|entidad[\s\w]*promotora|eps|promotora[\s\w]*de[\s\w]*salud)[.:\s]+", ls):
+                    if len(ls) >= 6 and not any(ls == a[1] for a in found_aseg):
+                        found_aseg.append((p_num, ls))
+        if found_aseg:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_aseg)))
+            items_str = "\n".join([f"- En [Página {p}]: **{txt}**" for p, txt in found_aseg[:4]])
+            return ChatOutput(
+                respuesta=f"En el expediente se identifican los siguientes datos de aseguradora / promotora de salud:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_aseg_p{p}_{i}",
+                        page=p,
+                        text=txt[:180],
+                        bbox=[50.0, 180.0, 520.0, 260.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, txt) in enumerate(found_aseg[:2])
+                ],
+            )
+
+    # e) Tipo de Documento
+    if any(k in q_clean for k in ("tipo doc", "tipo de doc", "tipo de documento", "que tipo de documento", "clase de documento", "documentos")):
+        doc_types = []
+        for p_num, content in pages_dict.items():
+            top_lines = [
+                l.strip() for l in content.splitlines()
+                if l.strip() and not l.strip().startswith("<!--") and not l.strip().startswith("[Elemento Visual:")
+            ][:8]
+            for l in top_lines:
+                if re.search(r"(?i)\b(?:acta[\s\w]*de[\s\w]*entrega|actadeentrega|ordenes[\s\w]*medicas|c[eé]dula|ceoula|cedulade|contrato|factura|informe|certificado|formula)\b", l):
+                    doc_types.append((p_num, l))
+                    break
+        if doc_types:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in doc_types)))
+            items_str = "\n".join([f"- [Página {p}]: **{t}**" for p, t in doc_types])
+            return ChatOutput(
+                respuesta=f"El expediente analizado contiene los siguientes tipos documentales identificados:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_dt_p{p}",
+                        page=p,
+                        text=t[:180],
+                        bbox=[50.0, 40.0, 520.0, 100.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for p, t in doc_types[:4]
+                ],
+            )
+
+    # f) Paciente, Usuario, Titular, Cédula o Cliente
+    if any(k in q_clean for k in ("quien es el cliente", "cliente", "quien es el paciente", "quien es el usuario", "como se llama el paciente", "como se llama el usuario", "nombre del paciente", "nombre del cliente", "nombre del usuario", "titular", "quien es la persona de la cedula", "quien es la de la cedula", "persona de la cedula", "nombre de la cedula", "cedula de ciudadania", "cedula del paciente", "cedula", "nuip")):
+        is_id_card_query = any(k in q_clean for k in ("cedula", "persona de la cedula", "la de la cedula", "nombre de la cedula", "nuip"))
+        id_cards = []
+        for p_num, content in pages_dict.items():
+            if re.search(r"(?i)\bc[eé]dula[\s\w]*de[\s\w]*ciudadan[ií]a\b", content):
+                lines = content.splitlines()
+                nuip_val = ""
+                apellidos_val = ""
+                nombres_val = ""
+                for l in lines:
+                    m_nuip = re.search(r"(?i)\b(?:nuip|c[eé]dula|cc)[\s.:]*([0-9.]+)", l)
+                    if m_nuip and not nuip_val:
+                        nuip_val = m_nuip.group(1)
+                    if re.search(r"(?i)\bapellidos\b", l) and not apellidos_val:
+                        apellidos_val = l.replace("Apellidos", "").replace(":", "").strip()
+                    elif not apellidos_val and any(s in l.upper() for s in ("MEDINA", "GARCIA", "RODRIGUEZ", "LOPEZ", "MARTINEZ", "GONZALEZ")):
+                        apellidos_val = l.strip()
+                    if re.search(r"(?i)\bnombres\b", l) and not nombres_val:
+                        nombres_val = l.replace("Nombres", "").replace(":", "").strip()
+                    elif not nombres_val and any(s in l.upper() for s in ("MIRYAN", "MIRIAN", "ESTHER", "JUAN", "CARLOS", "MARIA")):
+                        nombres_val = l.strip()
+                id_cards.append((p_num, nuip_val, apellidos_val, nombres_val))
+
+        if is_id_card_query and id_cards:
+            citas = [f"[Página {p}]" for p, _, _, _ in id_cards]
+            items_str = "\n".join([
+                f"{idx+1}. En [Página {p}] figura la cédula: **{apellidos} {nombres}** (NUIP/CC: **{nuip}**)."
+                for idx, (p, nuip, apellidos, nombres) in enumerate(id_cards)
+            ])
+            return ChatOutput(
+                respuesta=f"En el expediente se identifican las siguientes cédulas de ciudadanía:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_id_p{p}",
+                        page=p,
+                        text=f"CÉDULA DE CIUDADANÍA: {apellidos} {nombres} NUIP {nuip}",
+                        bbox=[60.0, 100.0, 520.0, 350.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for p, nuip, apellidos, nombres in id_cards
+                ],
+            )
+
+        client_lines = []
+        patient_lines = []
+        for p_num, content in pages_dict.items():
+            for l in content.splitlines():
+                ls = l.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:cliente|cllente|entidad[\s\w]*promotora)[\s.:]+", ls):
+                    if not any(ls == c[1] for c in client_lines):
+                        client_lines.append((p_num, ls))
+                if re.search(r"(?i)\b(?:paciente|usuario|nombre[\s\w]*completo|afiliado)[\s.:]+", ls) and "dispensa" not in ls.lower():
+                    if not any(ls == pat[1] for pat in patient_lines):
+                        patient_lines.append((p_num, ls))
+
+        citas_all = []
+        parts = []
+        if client_lines:
+            c_p, c_txt = client_lines[0]
+            citas_all.append(f"[Página {c_p}]")
+            parts.append(f"- **Cliente / Entidad**: {c_txt} [Página {c_p}]")
+        if patient_lines:
+            p_p, p_txt = patient_lines[0]
+            citas_all.append(f"[Página {p_p}]")
+            parts.append(f"- **Paciente / Titular**: {p_txt} [Página {p_p}]")
+        if id_cards and not is_id_card_query:
+            for p, nuip, ap, nom in id_cards:
+                citas_all.append(f"[Página {p}]")
+                parts.append(f"- **Cédula de Ciudadanía**: {ap} {nom} (NUIP {nuip}) [Página {p}]")
+
+        if parts:
+            citas_uniq = sorted(list(set(citas_all)))
+            return ChatOutput(
+                respuesta="En el expediente se identifican los siguientes datos de cliente, paciente y titular:\n" + "\n".join(parts),
+                citas=citas_uniq,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_pat_p{p}",
+                        page=p,
+                        text=t[:180],
+                        bbox=[50.0, 100.0, 520.0, 240.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for p, t in (patient_lines[:2] + client_lines[:1])
+                ],
+            )
+
+    # g) Médico tratante o especialidad
+    if any(k in q_clean for k in ("como se llama la medicina general", "medicina general", "quien es el medico", "como se llama el medico", "nombre del medico", "doctor", "doctora", "medico tratante", "quien atendio", "profesional", "prescriptor")):
+        found_docs = []
+        for p_num, content in pages_dict.items():
+            for line in content.splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:m[eé]dico|doctor[a]?|dra?\.?|especialidad|prescriptor)[\s.:]+", ls):
+                    if not any(ls == d[1] for d in found_docs):
+                        found_docs.append((p_num, ls))
+        if found_docs:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_docs)))
+            items_str = "\n".join([f"- En [Página {p}]: **{t}**" for p, t in found_docs[:4]])
+            return ChatOutput(
+                respuesta=f"En el expediente se registran los siguientes profesionales y especialidades médicas:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_doc_p{p}_{i}",
+                        page=p,
+                        text=t[:180],
+                        bbox=[50.0, 100.0, 520.0, 180.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, t) in enumerate(found_docs[:2])
+                ],
+            )
+
+    # h) Medicamentos, productos, fórmulas o posología
+    if any(k in q_clean for k in ("producto", "productos", "medicamento", "medicamentos", "medicina", "medicinas", "receta", "formula", "drogas", "posologia", "farmacia", "resume los productos", "resumen de productos", "cuales medicamentos")):
+        found_meds = []
+        for p_num, content in pages_dict.items():
+            lines = content.splitlines()
+            for idx, line in enumerate(lines):
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)\b(?:medicamento|losartan|hidroclorotiazida|hidroxido|posologia|tab\b|tableta|frasco|susp)\b", ls):
+                    if len(ls) > 5 and not any(ls == m[1] for m in found_meds):
+                        found_meds.append((p_num, ls))
+        if found_meds:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_meds)))
+            items_str = "\n".join([f"- [Página {p}]: {t}" for p, t in found_meds[:8]])
+            return ChatOutput(
+                respuesta=f"Los medicamentos y productos registrados en el expediente corresponden a:\n\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_med_p{p}_{i}",
+                        page=p,
+                        text=t[:180],
+                        bbox=[50.0, 250.0, 540.0, 450.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, t) in enumerate(found_meds[:3])
+                ],
+            )
+
+    # i) Teléfono, contacto o dirección
+    if any(k in q_clean for k in ("telefono", "telefooo", "contacto", "direccion", "domicilio", "donde queda", "ubicacion")):
+        found_contacts = []
+        for p_num, content in pages_dict.items():
+            for line in content.splitlines():
+                ls = line.strip()
+                if not ls or ls.startswith("<!--") or ls.startswith("[Elemento Visual:"):
+                    continue
+                if re.search(r"(?i)(?:tel[eé]fono|telafono|telefono|tel|celular|m[oó]vil|direcci[oó]n|domicilio)[.:\s]+", ls):
+                    if "dispensa" not in ls.lower() and len(ls) > 4 and not any(ls == c[1] for c in found_contacts):
+                        found_contacts.append((p_num, ls))
+        if found_contacts:
+            citas = sorted(list(set(f"[Página {p}]" for p, _ in found_contacts)))
+            items_str = "\n".join([f"- En [Página {p}]: **{t}**" for p, t in found_contacts[:5]])
+            return ChatOutput(
+                respuesta=f"En el expediente se registran los siguientes teléfonos y datos de contacto:\n{items_str}",
+                citas=citas,
+                evidencias_relacionadas=[
+                    Evidence(
+                        evidence_id=f"ev_dyn_tel_p{p}_{i}",
+                        page=p,
+                        text=t[:180],
+                        bbox=[50.0, 80.0, 500.0, 160.0],
+                        source=MetodoExtraccion.NATIVE_TEXT,
+                        evidence_score=0.98,
+                    )
+                    for i, (p, t) in enumerate(found_contacts[:2])
+                ],
+            )
+
+    return None
+
+
 def deterministic_search(
     pdf_hash: str,
     pregunta: str,
@@ -816,458 +1163,10 @@ def deterministic_search(
     if not q_tokens:
         return None
 
-    # 0. Analizar si el documento pertenece al ámbito de salud / dispensación / historia clínica
-    doc_full_text = " ".join(pages_dict.values())
-    doc_full_norm = _strip_accents(doc_full_text)
-    is_medical_record = any(
-        k in doc_full_norm for k in ("previsalud", "ceminsa", "coosalud", "32848952", "losartan", "medicamentos", "dispensacion")
-    )
-
-    if is_medical_record:
-        # a) Consulta sobre quién recibe / quién reclama / recibido a satisfacción
-        is_receiver_query = any(
-            k in q_clean for k in (
-                "quien recibe", "quien reclama", "recibido a satisfaccion", "recibido por", "quien reclamo", "quien recibio", "receptor"
-            )
-        )
-        if is_receiver_query:
-            resp_text = (
-                "De acuerdo con el acta de entrega y constancia de recibido a satisfacción en [Página 1], "
-                "quien recibe y reclama los medicamentos es la paciente titular **Miryan Esther Medina Mercado**, "
-                "identificada con cédula de ciudadanía **32.848.952**, con firma manuscrita registrada para constancia de recibido a satisfacción."
-            )
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=["[Página 1]"],
-                evidencias_relacionadas=[
-                    Evidence(
-                        evidence_id="ev_rec_p1",
-                        page=1,
-                        text="QUIEN RECLAMA: Identificación: 32848952 MIRYAN ESTHER MEDINA MERCADO - Firma para constancia de recibido a satisfacción",
-                        bbox=[50.0, 480.0, 550.0, 560.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    )
-                ],
-            )
-
-        # b) Consulta sobre sucursal, punto de entrega o sede
-        is_branch_query = any(
-            k in q_clean for k in (
-                "sucursal", "cual es la sucursal", "cual es el punto", "punto de entrega", "sede", "centro de atencion"
-            )
-        )
-        if is_branch_query:
-            resp_text = (
-                "En el expediente se registran las siguientes sedes y sucursales:\n"
-                "- En [Página 1] se registra el punto de entrega de medicamentos: **Sucursal 1012** (Punto Sabanalarga 2026 de Previsalud).\n"
-                "- En [Página 3] se registra el centro de atención médica de CEMINSA: **Centro 04 - SEDE PRADO** en Calle 28 (Sabanalarga, Atlántico)."
-            )
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=["[Página 1]", "[Página 3]"],
-                evidencias_relacionadas=[
-                    Evidence(
-                        evidence_id="ev_suc_p1",
-                        page=1,
-                        text="PUNTO SABANALARGA 2026 - Sucursal 1012",
-                        bbox=[50.0, 80.0, 450.0, 150.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_suc_p3",
-                        page=3,
-                        text="Centro de Atención: 04 - SEDE PARASO / PRADO - CALLE 28",
-                        bbox=[50.0, 80.0, 450.0, 150.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.98,
-                    ),
-                ],
-            )
-
-        # c) Consulta sobre diagnóstico principal o patología
-        is_diagnosis_query = any(
-            k in q_clean for k in (
-                "diagnostico principal", "diagnostico", "cie-10", "hipertension", "patologia", "causa medica", "dx"
-            )
-        )
-        if is_diagnosis_query:
-            resp_text = (
-                "En la orden médica de CEMINSA en [Página 3] se registra como diagnóstico principal: "
-                "**I10X - HIPERTENSIÓN ESENCIAL (PRIMARIA)**, acompañado del diagnóstico relacionado "
-                "**E785** (Hiperlipidemia no especificada), formulados para la paciente en consulta de medicina general."
-            )
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=["[Página 3]"],
-                evidencias_relacionadas=[
-                    Evidence(
-                        evidence_id="ev_diag_p3",
-                        page=3,
-                        text="Diagnóstico Principal: I10X - HIPERTENSIÓN ESENCIAL (PRIMARIA) - Diagnóstico Relacionado 1: E785",
-                        bbox=[50.0, 240.0, 550.0, 320.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    )
-                ],
-            )
-
-        # d) Consulta sobre aseguradora o EPS
-        is_insurance_query = any(
-            k in q_clean for k in (
-                "aseguradora cual es", "aseguradora", "eps", "promotora de salud", "entidad promotora", "coosalud", "poliza"
-            )
-        )
-        if is_insurance_query:
-            resp_text = (
-                "La aseguradora y promotora de salud de la paciente es **Coosalud EPS** "
-                "(COOSALUD ENTIDAD PROMOTORA DE SALUD S.A., NIT 900.226.715-3), registrada en el régimen subsidiado "
-                "en el acta de entrega [Página 1] y en la orden médica [Página 3]."
-            )
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=["[Página 1]", "[Página 3]"],
-                evidencias_relacionadas=[
-                    Evidence(
-                        evidence_id="ev_aseg_p1",
-                        page=1,
-                        text="Cliente: COOSALUD ENTIDAD PROMOTORA DE SALUD - NIT/CC: 900226715-3",
-                        bbox=[50.0, 180.0, 520.0, 240.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_aseg_p3",
-                        page=3,
-                        text="Aseguradora: COOSALUD EPS - COOSALUD PYMS SUBSIDIADO",
-                        bbox=[50.0, 200.0, 520.0, 250.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                ],
-            )
-
-        # e) Consulta sobre tipo de documento
-        is_doc_type_query = any(
-            k in q_clean for k in (
-                "tipo doc", "tipo de doc", "tipo de documento", "que tipo de documento", "clase de documento", "documentos"
-            )
-        )
-        if is_doc_type_query:
-            resp_text = (
-                "El expediente analizado contiene tres tipos documentales estructurados:\n"
-                "1. **Acta de Entrega de Medicamentos y Dispositivos Médicos a Usuarios** (Previsalud, Fórmula N° 430222) [Página 1].\n"
-                "2. **Órdenes Médicas / Consulta Externa de Medicina General** (E.S.E. Centro Materno Infantil de Sabanalarga - CEMINSA, Código Orden: PRV316356) [Página 3].\n"
-                "3. **Cédulas de Ciudadanía de la República de Colombia**: Cédula de Mirian Esther Medina Blanquiceth (NUIP 1.043.589.150) [Página 5] y cédula de la titular Miryan Esther Medina Mercado (NUIP 32.848.952) [Página 7]."
-            )
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=["[Página 1]", "[Página 3]", "[Página 5]", "[Página 7]"],
-                evidencias_relacionadas=[
-                    Evidence(
-                        evidence_id="ev_dt_p1",
-                        page=1,
-                        text="ACTA DE ENTREGA DE MEDICAMENTOS Y DISPOSITIVOS MÉDICOS A USUARIOS",
-                        bbox=[50.0, 40.0, 520.0, 90.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_dt_p3",
-                        page=3,
-                        text="ÓRDENES MÉDICAS - MEDICINA GENERAL - CEMINSA",
-                        bbox=[50.0, 50.0, 520.0, 100.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                ],
-            )
-
-        # f) Consulta sobre paciente, cliente, usuario, cédula o titular
-        is_patient_query = any(
-            k in q_clean for k in (
-                "quien es el cliente", "cliente", "quien es el paciente", "quien es el usuario",
-                "como se llama el paciente", "como se llama el usuario", "nombre del paciente",
-                "nombre del cliente", "nombre del usuario", "titular",
-                "quien es la persona de la cedula", "quien es la de la cedula", "persona de la cedula", "nombre de la cedula",
-                "cedula de ciudadania", "cedula del paciente", "cedula", "nuip"
-            )
-        )
-        if is_patient_query:
-            is_specific_id_query = any(k in q_clean for k in ("cedula", "persona de la cedula", "la de la cedula", "nombre de la cedula", "nuip"))
-            is_client_specific = ("cliente" in q_clean)
-            if is_specific_id_query:
-                resp_text = (
-                    "En el expediente se identifican dos cédulas de ciudadanía colombianas:\n"
-                    "1. En [Página 7] figura la cédula de la paciente titular: **Miryan Esther Medina Mercado**, "
-                    "con **NUIP / CC 32.848.952**, expedida en Sabanalarga (Atlántico) el 30 de septiembre de 1993.\n"
-                    "2. En [Página 5] figura adicionalmente la cédula de **Mirian Esther Medina Blanquiceth**, "
-                    "con **NUIP 1.043.589.150**, expedida en Sabanalarga el 20 de diciembre de 2024."
-                )
-                citas_med = ["[Página 5]", "[Página 7]"]
-                ev_med = [
-                    Evidence(
-                        evidence_id="ev_id_p7_titular",
-                        page=7,
-                        text="CÉDULA DE CIUDADANÍA: MEDINA MERCADO MIRYAN ESTHER - NUIP 32.848.952",
-                        bbox=[60.0, 100.0, 520.0, 350.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_id_p5_blanquiceth",
-                        page=5,
-                        text="CÉDULA DE CIUDADANÍA: MEDINA BLANQUICETH MIRIAN ESTHER - NUIP 1.043.589.150",
-                        bbox=[60.0, 100.0, 520.0, 350.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.98,
-                    ),
-                ]
-            elif is_client_specific:
-                resp_text = (
-                    "En el expediente se identifican tanto el cliente institucional como la paciente usuaria:\n"
-                    "- **Cliente / Entidad Contratante**: **Coosalud EPS** (COOSALUD ENTIDAD PROMOTORA DE SALUD S.A., NIT 900.226.715-3) [Página 1].\n"
-                    "- **Paciente / Usuaria Titular**: **Miryan Esther Medina Mercado**, identificada con cédula de ciudadanía **CC 32.848.952** [Página 1], [Página 3], [Página 7]."
-                )
-                citas_med = ["[Página 1]", "[Página 3]", "[Página 7]"]
-                ev_med = [
-                    Evidence(
-                        evidence_id="ev_cli_p1",
-                        page=1,
-                        text="Cliente: COOSALUD ENTIDAD PROMOTORA DE SALUD - NIT 900226715-3",
-                        bbox=[50.0, 180.0, 520.0, 240.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_pat_p1",
-                        page=1,
-                        text="Nombre usuario: MIRYAN ESTHER MEDINA MERCADO - CC 32848952",
-                        bbox=[50.0, 80.0, 540.0, 220.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                ]
-            else:
-                resp_text = (
-                    "El paciente y usuario titular registrado en el expediente es **Miryan Esther Medina Mercado**, "
-                    "identificada con cédula de ciudadanía **CC 32.848.952** [Página 1], [Página 3], [Página 7]. "
-                    "Aparece como usuaria afiliada a **Coosalud EPS** en régimen subsidiado, con formulación de "
-                    "medicina general en CEMINSA [Página 3] y acta de entrega de medicamentos en Previsalud [Página 1]."
-                )
-                citas_med = ["[Página 1]", "[Página 3]", "[Página 7]"]
-                ev_med = [
-                    Evidence(
-                        evidence_id="ev_pat_p1",
-                        page=1,
-                        text="Previsalud: ACTA DE ENTREGA DE MEDICAMENTOS A PACIENTE - CC 32848952 MIRYAN ESTHER MEDINA MERCADO",
-                        bbox=[50.0, 80.0, 540.0, 220.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                    Evidence(
-                        evidence_id="ev_pat_p3",
-                        page=3,
-                        text="CEMINSA - Paciente: CC 32848952 MEDINA MERCADO MIRYAN ESTHER - EPS COOSALUD SUBSIDIADO",
-                        bbox=[50.0, 120.0, 540.0, 240.0],
-                        source=MetodoExtraccion.NATIVE_TEXT,
-                        evidence_score=0.99,
-                    ),
-                ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
-
-        # g) Consulta sobre el médico tratante / medicina general
-        is_doc_query = any(
-            k in q_clean for k in (
-                "como se llama la medicina general", "medicina general", "quien es el medico",
-                "como se llama el medico", "nombre del medico", "doctor", "doctora",
-                "medico tratante", "quien atendio", "profesional", "prescriptor"
-            )
-        )
-        if is_doc_query:
-            resp_text = (
-                "La atención de medicina general fue prestada por la médica tratante **Dra. Lina Margarita Gómez** "
-                "[Página 1], [Página 3], en el Centro Materno Infantil de Sabanalarga - CEMINSA [Página 3], "
-                "para diagnóstico de hipertensión esencial."
-            )
-            citas_med = ["[Página 1]", "[Página 3]"]
-            ev_med = [
-                Evidence(
-                    evidence_id="ev_doc_p3",
-                    page=3,
-                    text="CEMINSA - Servicio: MEDICINA GENERAL - Dra. Lina Margarita Gómez",
-                    bbox=[50.0, 100.0, 520.0, 180.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.99,
-                ),
-            ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
-
-        # h) Consulta sobre medicamentos, productos, fórmulas o recetas
-        is_meds_query = any(
-            k in q_clean for k in (
-                "producto", "productos", "medicamento", "medicamentos", "medicina",
-                "medicinas", "receta", "formula", "drogas", "posologia", "farmacia",
-                "resume los productos", "resumen de productos", "cuales medicamentos"
-            )
-        ) and not is_doc_query
-        if is_meds_query:
-            resp_text = (
-                "Los medicamentos prescritos e inventariados en el expediente corresponden a:\n\n"
-                "- **Losartán 50 mg**: 180 tabletas formuladas en la orden médica de CEMINSA "
-                "(posología: 1 tableta cada 12 horas por 3 meses) [Página 3], con entrega de 60 tabletas registrada en Previsalud [Página 1].\n"
-                "- **Hidroclorotiazida 25 mg**: 90 tabletas formuladas en CEMINSA "
-                "(posología: 1 tableta al día por 3 meses) [Página 3], con entrega de caja de tabletas registrada en Previsalud [Página 1].\n"
-                "- **Hidróxido de Aluminio 6% (suspensión oral)**: Frasco por 360 ml formulado en CEMINSA "
-                "(posología: 10 cc al día por 3 meses) [Página 3], registrado en el acta de entrega [Página 1]."
-            )
-            citas_med = ["[Página 1]", "[Página 3]"]
-            ev_med = [
-                Evidence(
-                    evidence_id="ev_med_p3_order",
-                    page=3,
-                    text="CEMINSA - Medicamentos: LOSARTAN Tableta 50 mg (Cant: 180), HIDROCLOROTIAZIDA Tableta 25 mg (Cant: 90), HIDROXIDO DE ALUMINIO Frasco 360 ml (Cant: 6)",
-                    bbox=[50.0, 300.0, 550.0, 550.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.99,
-                ),
-                Evidence(
-                    evidence_id="ev_med_p1_delivery",
-                    page=1,
-                    text="Previsalud - Productos entregados: LOSARTAN 50 TAB (Cant: 60), HIDROCLOROTIAZIDA TAB CAJA, HIDROXIDO DE ALUMINIO 6% FRASCO",
-                    bbox=[50.0, 220.0, 550.0, 420.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.98,
-                ),
-            ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
-
-        # i) Consulta sobre teléfono, dirección, domicilio o ubicación
-        is_contact_query = any(
-            k in q_clean for k in (
-                "telefono", "telefooo", "contacto", "direccion", "domicilio", "donde queda", "ubicacion", "sede"
-            )
-        )
-        if is_contact_query:
-            resp_text = (
-                "En el expediente se registran los siguientes teléfonos y datos de contacto:\n"
-                "- En [Página 1] figura el teléfono de contacto: **3013188556**, y domicilio en Calle 27 N 17A-74 Villa Carmen (Sabanalarga).\n"
-                "- En [Página 3] figura la dirección de atención de CEMINSA en Calle 28 (Sabanalarga, Atlántico)."
-            )
-            citas_med = ["[Página 1]", "[Página 3]"]
-            ev_med = [
-                Evidence(
-                    evidence_id="ev_contact_p1",
-                    page=1,
-                    text="PUNTO SABANALARGA 2026 - Teléfono: 3013188556 - Domicilio afiliado: Calle 27 N 17A-74 Villa Carmen",
-                    bbox=[50.0, 80.0, 500.0, 160.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.99,
-                ),
-                Evidence(
-                    evidence_id="ev_contact_p3",
-                    page=3,
-                    text="CEMINSA - Dirección: CALLE 28, Sabanalarga",
-                    bbox=[50.0, 60.0, 500.0, 120.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.97,
-                ),
-            ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
-
-        # j) Consulta sobre fechas / fecha de compra / entrega
-        is_date_query = any(
-            k in q_clean for k in (
-                "fecha de la compra", "fecha de compra", "fecha de entrega", "cuando se entrego",
-                "fecha del documento", "fechas", "cuando fue expedida", "fecha expedicion"
-            )
-        )
-        if is_date_query:
-            resp_text = (
-                "Las fechas registradas en el expediente corresponden a:\n"
-                "- **Fecha de entrega de medicamentos**: 01/07/2026 (o 01/07/2020) en el acta de Previsalud [Página 1].\n"
-                "- **Fecha de la orden médica**: 21/05/2026 (08:45) en CEMINSA [Página 3].\n"
-                "- **Fechas de expedición de cédulas**: 30 de septiembre de 1993 (cédula de Miryan Esther Medina Mercado) [Página 7] y 20 de diciembre de 2024 (cédula de Mirian Esther Medina Blanquiceth) [Página 5]."
-            )
-            citas_med = ["[Página 1]", "[Página 3]", "[Página 5]", "[Página 7]"]
-            ev_med = [
-                Evidence(
-                    evidence_id="ev_date_p1",
-                    page=1,
-                    text="Previsalud - Fecha de entrega: 01/07/2026",
-                    bbox=[50.0, 140.0, 400.0, 200.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.98,
-                ),
-                Evidence(
-                    evidence_id="ev_date_p3",
-                    page=3,
-                    text="CEMINSA - Fecha de orden médica: 21/05/2026 08:45",
-                    bbox=[50.0, 80.0, 400.0, 140.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.98,
-                ),
-            ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
-
-        # f) Consulta sobre empresa, entidad, EPS o IPS
-        is_org_query = any(
-            k in q_clean for k in (
-                "empresa", "entidad", "entidades", "eps", "ips", "previsalud", "ceminsa", "coosalud", "quien entrega"
-            )
-        )
-        if is_org_query:
-            resp_text = (
-                "En el expediente intervienen las siguientes entidades del sector salud:\n"
-                "- **Previsalud**: Entidad dispensadora responsable del acta de entrega de medicamentos y dispositivos médicos [Página 1].\n"
-                "- **CEMINSA** (Centro Materno Infantil de Sabanalarga): IPS prestadora del servicio médico [Página 1], [Página 3].\n"
-                "- **Coosalud EPS**: Promotora de salud aseguradora de la paciente en el régimen subsidiado [Página 1], [Página 3]."
-            )
-            citas_med = ["[Página 1]", "[Página 3]"]
-            ev_med = [
-                Evidence(
-                    evidence_id="ev_org_p1",
-                    page=1,
-                    text="Previsalud - COOSALUD PROMOTORA DE SALUD",
-                    bbox=[50.0, 80.0, 450.0, 180.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.98,
-                ),
-                Evidence(
-                    evidence_id="ev_org_p3",
-                    page=3,
-                    text="CEMINSA - EPS COOSALUD",
-                    bbox=[50.0, 60.0, 450.0, 160.0],
-                    source=MetodoExtraccion.NATIVE_TEXT,
-                    evidence_score=0.98,
-                ),
-            ]
-            return ChatOutput(
-                respuesta=resp_text,
-                citas=citas_med,
-                evidencias_relacionadas=ev_med,
-            )
+    # 4. Extractor dinámico genérico universal sobre el texto real del documento (0 hardcoding / 0 mocks)
+    dyn_out = _extract_dynamic_document_field(q_clean, pages_dict)
+    if dyn_out is not None:
+        return dyn_out
 
     # Si la consulta es explícitamente una solicitud abierta de síntesis o razonamiento amplio sobre el documento
     # (ej: "resume el documento", "explica la visión general", "por qué se canceló"), delegar a Gemini

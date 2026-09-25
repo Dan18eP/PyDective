@@ -145,6 +145,7 @@ def process_chat_query(
     historial: List[ChatMessage] = [],
     fallback_store: Optional[Dict[str, Any]] = None,
     skip_llm: bool = False,
+    usar_modelo_local: bool = False,
 ) -> Optional[ChatOutput]:
     """
     Procesa consultas en lenguaje natural con inteligencia contextual, búsqueda en L1,
@@ -360,8 +361,12 @@ def process_chat_query(
         return det_out
 
     # 4b. Opción 1: Generador Estructural Sintético en RAM (< 30 ms, 0 tokens, 0% CPU)
-    from app.services.providers import get_llm_provider
-    llm_provider = get_llm_provider()
+    if usar_modelo_local:
+        from app.services.providers.local_provider import LocalLLMProvider
+        llm_provider = LocalLLMProvider(model_name="llama3.2:1b")
+    else:
+        from app.services.providers import get_llm_provider
+        llm_provider = get_llm_provider()
     is_mock = getattr(llm_provider, "name", "").startswith("mock")
 
     is_global_summary = any(
@@ -545,11 +550,13 @@ def process_chat_query_stream(
     pregunta: str,
     historial: Optional[List[ChatMessage]] = None,
     fallback_store: Optional[Dict[str, JobOutput]] = None,
+    usar_modelo_local: bool = False,
 ):
     """
     Generador de Server-Sent Events (SSE) para el chat documental interactivo.
-    - Si la consulta es determinista o un resumen sintético en RAM (Opción 1), emite el resultado completo de inmediato.
-    - Si requiere razonamiento conversacional con el SLM (Opción 2 y 3), emite tokens en tiempo real (< 350 ms).
+    - Si usar_modelo_local es False: resuelve en modo por defecto (determinista ultrarrápido en RAM, <5ms).
+    - Si usar_modelo_local es True: procesa y transmite la respuesta en tiempo real token por token vía SSE
+      utilizando el modelo local más rápido (llama3.2:1b).
     """
     import json
     q_norm = _strip_accents(pregunta.lower().strip())
@@ -560,36 +567,44 @@ def process_chat_query_stream(
         )
     )
 
-    # 1. Intentar resolución determinista ultrarrápida en RAM (<5ms, 0 tokens)
-    out = process_chat_query(
-        pdf_hash=pdf_hash,
-        pregunta=pregunta,
-        historial=historial,
-        fallback_store=fallback_store,
-        skip_llm=True,
-    )
-    if out is not None:
-        yield f"data: {json.dumps({'token': out.respuesta, 'citas': out.citas, 'final': True})}\n\n"
-        return
+    if not usar_modelo_local:
+        # Modo por defecto (tal y como está ahora):
+        # 1. Intentar resolución determinista ultrarrápida en RAM (<5ms, 0 tokens)
+        out = process_chat_query(
+            pdf_hash=pdf_hash,
+            pregunta=pregunta,
+            historial=historial,
+            fallback_store=fallback_store,
+            skip_llm=True,
+            usar_modelo_local=False,
+        )
+        if out is not None:
+            yield f"data: {json.dumps({'token': out.respuesta, 'citas': out.citas, 'final': True})}\n\n"
+            return
 
-    from app.services.providers import get_llm_provider
-    llm_prov = get_llm_provider()
-
-    # Si el proveedor LLM no soporta streaming o no está disponible, resolver con fallback tradicional
-    if not hasattr(llm_prov, "generate_chat_stream") or not llm_prov.is_available():
+        # Fallback tradicional si no hubo coincidencia determinista estricta
         fallback_out = process_chat_query(
             pdf_hash=pdf_hash,
             pregunta=pregunta,
             historial=historial,
             fallback_store=fallback_store,
             skip_llm=False,
+            usar_modelo_local=False,
         )
         if fallback_out:
             yield f"data: {json.dumps({'token': fallback_out.respuesta, 'citas': fallback_out.citas, 'final': True})}\n\n"
         return
 
-    # Si es una consulta abierta hacia el SLM local, transmitir streaming token por token
-    target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
+    # Si usar_modelo_local es True: invocar el SLM local más rápido (llama3.2:1b)
+    from app.services.providers.local_provider import LocalLLMProvider
+    llm_prov = LocalLLMProvider(model_name="llama3.2:1b")
+
+    if not llm_prov.is_available():
+        yield f"data: {json.dumps({'token': '⚠️ El modelo local (llama3.2:1b) no se encuentra disponible en este momento. Asegúrate de tener ejecutando `ollama serve` en tu equipo.', 'citas': [], 'final': True})}\n\n"
+        return
+
+    # Si es una consulta hacia el SLM local, transmitir streaming token por token
+    target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=3)
     if not target_context:
         target_context = get_or_create_page_indexed_markdown(pdf_hash)
 
@@ -600,11 +615,11 @@ def process_chat_query_stream(
         target_context = "\n".join(lines_clean)
 
     sys_instruction = (
-        "Eres un asistente documental experto analizando folios y expedientes. "
-        "Responde brevemente basándote exclusivamente en el contexto provisto. "
-        "Cita siempre la página de origen en formato '[Página X]'. "
+        "Eres un asistente documental forense analizando folios y expedientes. "
+        "Responde de forma clara, directa y estructurada basándote exclusivamente en el contexto provisto. "
+        "Cita siempre las páginas de origen en formato '[Página X]'. "
         "Nunca repitas etiquetas de maquetación técnica ni bloques '[Elemento Visual: ...]' en tu respuesta. "
-        "Responde en lenguaje natural claro y directo."
+        "Responde en lenguaje natural en español."
     )
     prompt = (
         "--- INICIO DEL DOCUMENTO ---\n"
@@ -614,17 +629,16 @@ def process_chat_query_stream(
         f"{pregunta}"
     )
 
-    token_count = 0
     full_text_acc = ""
     for token in llm_prov.generate_chat_stream(prompt=prompt, system_instruction=sys_instruction):
-        token_count += 1
         full_text_acc += token
         yield f"data: {json.dumps({'token': token, 'citas': [], 'final': False})}\n\n"
 
     # Extraer citas de páginas del texto completo emitido
     cited_pages = [int(m) for m in re.findall(r"\[Página\s+(\d+)\]", full_text_acc, re.IGNORECASE)]
     cited_pages = sorted(list(set(cited_pages)))
-    citas = [f"[Página {p}]" for p in cited_pages] if cited_pages else out.citas
+    citas = [f"[Página {p}]" for p in cited_pages]
 
     yield f"data: {json.dumps({'token': '', 'citas': citas, 'final': True})}\n\n"
+
 

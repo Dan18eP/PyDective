@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initParamInputs();
     renderActiveParams();
     initEngineSelector();
+    initLocalModelToggle();
 });
 
 // Dropzone Initialization
@@ -361,6 +362,37 @@ function askQuickPrompt(text) {
     }
 }
 
+// Local Model Switch Toggle Handlers
+window.handleLocalModelToggleChange = function(checkbox) {
+    if (!checkbox) return;
+    const isChecked = checkbox.checked;
+    const container = document.getElementById('chat-toggle-container') || checkbox.closest('.chat-toggle-container');
+    const subtitle = document.getElementById('toggle-subtitle-text');
+    const icon = document.getElementById('toggle-status-icon');
+
+    if (isChecked) {
+        if (container) container.classList.add('active');
+        if (subtitle) subtitle.textContent = 'Activo (llama3.2:1b)';
+        if (icon) icon.textContent = '⚡';
+        localStorage.setItem('pydective_local_llm_active', 'true');
+    } else {
+        if (container) container.classList.remove('active');
+        if (subtitle) subtitle.textContent = 'Inactivo';
+        if (icon) icon.textContent = '⚡';
+        localStorage.setItem('pydective_local_llm_active', 'false');
+    }
+};
+
+function initLocalModelToggle() {
+    const toggleEl = document.getElementById('toggle-local-model');
+    if (!toggleEl) return;
+    const savedLocalLlm = localStorage.getItem('pydective_local_llm_active');
+    if (savedLocalLlm === 'true') {
+        toggleEl.checked = true;
+    }
+    window.handleLocalModelToggleChange(toggleEl);
+}
+
 async function sendChatMessage() {
     const input = document.getElementById("chat-input-field");
     const container = document.getElementById("chat-messages-container");
@@ -371,6 +403,10 @@ async function sendChatMessage() {
     if (!pregunta) return;
 
     const pdfHash = hashEl.textContent.trim();
+
+    // Consultar estado del switch de Modelo Local
+    const localToggle = document.getElementById("toggle-local-model");
+    const usarModeloLocal = localToggle ? localToggle.checked : false;
 
     // Append User Bubble
     const userBubble = document.createElement("div");
@@ -383,7 +419,9 @@ async function sendChatMessage() {
     // Append Assistant Loading Bubble
     const assistantBubble = document.createElement("div");
     assistantBubble.className = "chat-bubble bubble-assistant";
-    assistantBubble.innerHTML = `<span class="text-muted">Consultando evidencias L1...</span>`;
+    assistantBubble.innerHTML = usarModeloLocal
+        ? `<span class="text-muted">Invocando modelo local (llama3.2:1b)...</span>`
+        : `<span class="text-muted">Consultando evidencias L1...</span>`;
     container.appendChild(assistantBubble);
     container.scrollTop = container.scrollHeight;
 
@@ -400,7 +438,8 @@ async function sendChatMessage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     pregunta: pregunta,
-                    historial: chatHistory
+                    historial: chatHistory,
+                    usar_modelo_local: usarModeloLocal
                 })
             });
 
@@ -456,7 +495,8 @@ async function sendChatMessage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     pregunta: pregunta,
-                    historial: chatHistory
+                    historial: chatHistory,
+                    usar_modelo_local: usarModeloLocal
                 })
             });
 

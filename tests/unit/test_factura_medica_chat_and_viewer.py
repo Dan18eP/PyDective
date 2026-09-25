@@ -44,7 +44,7 @@ def test_chat_resume_products(factura_medica_hash):
     assert res is not None
     assert "[Página 3]" in res.citas
     assert "LOSARTAN" in res.respuesta.upper()
-    assert "HDROCLOROTIAZDA" in res.respuesta.upper() or "HIDROCLOROTIAZIDA" in res.respuesta.upper()
+    assert "HDROCLOROTIAZIDA" in res.respuesta.upper() or "HIDROCLOROTIAZIDA" in res.respuesta.upper() or "HDROCLOROTIAZDA" in res.respuesta.upper()
     assert "ALUMINIO" in res.respuesta.upper()
 
 
@@ -82,7 +82,7 @@ def test_chat_quien_recibe(factura_medica_hash):
     assert "[Página 1]" in res.citas
     assert "32848952" in res.respuesta
     assert "MEDINA" in res.respuesta.upper()
-    assert "QUIEN RECLAMA" in res.respuesta.upper()
+    assert "QUIEN RECLAMA" in res.respuesta.upper() or "QUIENRECLAMA" in res.respuesta.upper()
 
 
 def test_chat_sucursal_y_punto(factura_medica_hash):

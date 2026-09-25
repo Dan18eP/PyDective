@@ -109,6 +109,10 @@ class ChatMessage(BaseModel):
 class ChatInput(BaseModel):
     pregunta: str = Field(min_length=1)
     historial: List[ChatMessage] = Field(default_factory=list)
+    usar_modelo_local: bool = Field(
+        default=False,
+        description="Fuerza el procesamiento mediante el SLM local más rápido vía streaming SSE"
+    )
 
 
 class ChatOutput(BaseModel):

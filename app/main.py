@@ -1102,6 +1102,7 @@ async def chat_documental(pdf_hash: str, payload: ChatInput):
         pregunta=payload.pregunta,
         historial=payload.historial,
         fallback_store=MOCK_RESULTS_STORE,
+        usar_modelo_local=payload.usar_modelo_local,
     )
 
 
@@ -1119,6 +1120,7 @@ async def chat_documental_stream(pdf_hash: str, payload: ChatInput):
             pregunta=payload.pregunta,
             historial=payload.historial,
             fallback_store=MOCK_RESULTS_STORE,
+            usar_modelo_local=payload.usar_modelo_local,
         ),
         media_type="text/event-stream",
         headers={

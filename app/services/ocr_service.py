@@ -23,8 +23,13 @@ def get_ocr_engine():
     if not _OCR_INITIALIZED:
         try:
             from rapidocr_onnxruntime import RapidOCR
-            _OCR_ENGINE = RapidOCR()
-            logger.info("Motor RapidOCR inicializado exitosamente en modo CPU/ONNX Runtime.")
+            _OCR_ENGINE = RapidOCR(
+                intra_op_num_threads=4,
+                use_cls=False,
+                Det_limit_side_len=960,
+                Det_limit_type="max",
+            )
+            logger.info("Motor RapidOCR optimizado (4 hilos, use_cls=False, Det max=960) inicializado exitosamente.")
         except Exception as exc:
             logger.warning("RapidOCR no disponible en el entorno local: %s", exc)
             _OCR_ENGINE = None
@@ -69,7 +74,7 @@ def clean_ocr_line(line: str) -> str:
 
 def extract_page_ocr(
     page: pymupdf.Page,
-    dpi: int = 300,
+    dpi: int = 150,
     img_arr: Optional[np.ndarray] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """

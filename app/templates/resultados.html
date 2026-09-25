@@ -229,17 +229,34 @@
             <!-- Pydective Chat Interactivo con Grounding -->
             <div class="glass-card chat-card chat-hero-card" style="height: 480px;">
                 <div class="chat-header">
-                    <div class="chat-title-group">
-                        <div class="chat-avatar">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                            </svg>
+                    <div class="chat-header-main">
+                        <div class="chat-title-group">
+                            <div class="chat-avatar">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                            </div>
+                            <div>
+                                <h2 class="chat-title">Pydective Chat</h2>
+                                <span class="chat-subtitle">Consulta datos o imágenes y visualiza su fuente exacta en el visor</span>
+                            </div>
                         </div>
-                        <div>
-                            <h2 class="chat-title">Pydective Chat</h2>
-                            <span class="chat-subtitle">Consulta datos o imágenes y visualiza su fuente exacta en el visor</span>
+
+                        <!-- Switch Toggle Modelo Local SSE -->
+                        <div class="chat-toggle-container" id="chat-toggle-container">
+                            <div class="toggle-control-group" title="Activa para responder con el modelo local más rápido en tiempo real (llama3.2:1b) vía streaming SSE. Desactívalo para mantener el motor determinista instantáneo.">
+                                <span class="toggle-status-icon" id="toggle-status-icon">⚡</span>
+                                <div class="toggle-labels">
+                                    <span class="toggle-title">Modelo Local</span>
+                                    <span class="toggle-subtitle" id="toggle-subtitle-text">Inactivo</span>
+                                </div>
+                                <label class="switch-toggle" for="toggle-local-model">
+                                    <input type="checkbox" id="toggle-local-model" onchange="window.handleLocalModelToggleChange(this);">
+                                    <span class="slider-round"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
 

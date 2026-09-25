@@ -270,7 +270,9 @@ def process_chat_query(
                     matched_findings.append(ev.text)
 
     # 3b. Mapeo semántico para consultas conceptuales abiertas sobre partes, representantes o firmantes
-    is_party_query = any(k in q_norm for k in ("parte", "partes", "representante", "representantes", "quien", "quienes", "firmante", "firmantes", "personas", "entidades", "titular"))
+    is_party_query = any(k in q_norm for k in ("parte", "partes", "representante", "representantes", "firmante", "firmantes")) or (
+        any(k in q_norm for k in ("quien", "quienes")) and not any(k in q_norm for k in ("cedula", "recibe", "reclama", "entrega", "formula", "atiende", "medico", "doctor", "diagnostico"))
+    )
     if is_party_query:
         party_params = ("arrendador", "arrendatario", "representante legal", "representante", "cliente", "proveedor", "contratante", "contratista", "notario", "comprador", "vendedor")
         all_findings = []
@@ -604,7 +606,7 @@ def process_chat_query_stream(
         return
 
     # Si es una consulta hacia el SLM local, transmitir streaming token por token
-    target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=3)
+    target_context = get_relevant_page_slices(pdf_hash, pregunta, max_pages=2)
     if not target_context:
         target_context = get_or_create_page_indexed_markdown(pdf_hash)
 
@@ -615,18 +617,19 @@ def process_chat_query_stream(
         target_context = "\n".join(lines_clean)
 
     sys_instruction = (
-        "Eres un asistente documental forense analizando folios y expedientes. "
-        "Responde de forma clara, directa y estructurada basándote exclusivamente en el contexto provisto. "
-        "Cita siempre las páginas de origen en formato '[Página X]'. "
-        "Nunca repitas etiquetas de maquetación técnica ni bloques '[Elemento Visual: ...]' en tu respuesta. "
-        "Responde en lenguaje natural en español."
+        "Eres el asistente pericial de PyDective. "
+        "Responde ÚNICAMENTE y de forma DIRECTA, BREVE y CONCISA a lo que se te pregunta sobre el documento. "
+        "NO te extiendas con introducciones ni explicaciones no solicitadas. Ve directo al grano. "
+        "Cita siempre la página correspondiente en formato '[Página X]'. "
+        "Si la respuesta es un dato puntual (nombres, entidades, valores, medicamentos), entrégalo directamente en 1 o 2 líneas."
     )
     prompt = (
-        "--- INICIO DEL DOCUMENTO ---\n"
+        "--- CONTEXTO DEL DOCUMENTO ---\n"
         f"{target_context}\n"
-        "--- FIN DEL DOCUMENTO ---\n\n"
-        "SOLICITUD DEL USUARIO:\n"
-        f"{pregunta}"
+        "--- FIN DEL CONTEXTO ---\n\n"
+        "PREGUNTA DEL USUARIO:\n"
+        f"{pregunta}\n\n"
+        "RESPUESTA DIRECTA Y CONCISA:"
     )
 
     full_text_acc = ""

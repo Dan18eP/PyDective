@@ -82,7 +82,7 @@ class LocalLLMProvider(BaseLLMProvider):
             "model": self.model_name,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 350,
+            "max_tokens": 120,
             "stream": False,
             "options": {"num_thread": threads},
         }
@@ -128,7 +128,7 @@ class LocalLLMProvider(BaseLLMProvider):
             "model": self.model_name,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 350,
+            "max_tokens": 120,
             "stream": True,
             "options": {"num_thread": threads},
         }

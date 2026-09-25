@@ -24,12 +24,13 @@ def get_ocr_engine():
         try:
             from rapidocr_onnxruntime import RapidOCR
             _OCR_ENGINE = RapidOCR(
-                intra_op_num_threads=4,
+                intra_op_num_threads=2,
                 use_cls=False,
-                Det_limit_side_len=960,
-                Det_limit_type="max",
+                det_limit_side_len=960,
+                det_limit_type="max",
+                rec_batch_num=12,
             )
-            logger.info("Motor RapidOCR optimizado (4 hilos, use_cls=False, Det max=960) inicializado exitosamente.")
+            logger.info("Motor RapidOCR optimizado (2 hilos/worker, batch=12, use_cls=False, Det max=960) inicializado.")
         except Exception as exc:
             logger.warning("RapidOCR no disponible en el entorno local: %s", exc)
             _OCR_ENGINE = None
@@ -78,8 +79,10 @@ def extract_page_ocr(
     img_arr: Optional[np.ndarray] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
-    Ejecuta el pipeline de OCR local sobre una página PDF o un array numpy ya preprocesado (Deskew/Otsu).
-    Retorna el texto unificado y la lista de cajas de texto con coordenadas en puntos PDF.
+    Ejecuta el pipeline de OCR local optimizado:
+    1. Descarte instantáneo de páginas en blanco (<2 ms).
+    2. Binarización adaptativa Otsu para aceleración de decodificación CRNN.
+    3. Inferencia de cajas de texto con RapidOCR a 150 DPI.
     """
     engine = get_ocr_engine()
     if engine is None:
@@ -90,16 +93,23 @@ def extract_page_ocr(
         return "", []
 
     try:
-        if img_arr is not None:
-            scale_x = img_arr.shape[1] / page_rect.width
-            scale_y = img_arr.shape[0] / page_rect.height
-            ocr_results, _ = engine(img_arr)
-        else:
+        if img_arr is None:
             pix = page.get_pixmap(dpi=dpi, alpha=False)
             img_arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
-            scale_x = pix.width / page_rect.width
-            scale_y = pix.height / page_rect.height
-            ocr_results, _ = engine(img_arr)
+
+        # 1. Descarte ultrarrápido de páginas en blanco (dorsos vacíos como páginas 2 y 4)
+        import cv2
+        gray = cv2.cvtColor(img_arr, cv2.COLOR_RGB2GRAY)
+        if float(np.std(gray)) < 10.0 and float(np.mean(gray)) > 245.0:
+            return "", []
+
+        # 2. Binarización adaptativa Otsu para acelerar decodificación CRNN sin alterar geometría
+        from app.services.preprocess_service import evaluate_contrast_and_otsu
+        img_prep, _ = evaluate_contrast_and_otsu(img_arr)
+
+        scale_x = img_prep.shape[1] / page_rect.width
+        scale_y = img_prep.shape[0] / page_rect.height
+        ocr_results, _ = engine(img_prep)
     except Exception as exc:
         logger.error("Error ejecutando inferencia OCR en página %s: %s", page.number + 1, exc)
         return "", []
